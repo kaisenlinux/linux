@@ -2699,9 +2699,8 @@ static void ace_get_drvinfo(struct net_device *dev,
 	struct ace_private *ap = netdev_priv(dev);
 
 	strlcpy(info->driver, "acenic", sizeof(info->driver));
-	snprintf(info->version, sizeof(info->version), "%i.%i.%i",
-		 ap->firmware_major, ap->firmware_minor,
-		 ap->firmware_fix);
+	snprintf(info->fw_version, sizeof(info->version), "%i.%i.%i",
+		 ap->firmware_major, ap->firmware_minor, ap->firmware_fix);
 
 	if (ap->pdev)
 		strlcpy(info->bus_info, pci_name(ap->pdev),
@@ -2886,11 +2885,8 @@ static int ace_load_firmware(struct net_device *dev)
 		fw_name = "acenic/tg1.bin";
 
 	ret = request_firmware(&fw, fw_name, &ap->pdev->dev);
-	if (ret) {
-		printk(KERN_ERR "%s: Failed to load firmware \"%s\"\n",
-		       ap->name, fw_name);
+	if (ret)
 		return ret;
-	}
 
 	fw_data = (void *)fw->data;
 

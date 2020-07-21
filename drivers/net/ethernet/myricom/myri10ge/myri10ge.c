@@ -580,8 +580,6 @@ static int myri10ge_load_hotplug_firmware(struct myri10ge_priv *mgp, u32 * size)
 	unsigned i;
 
 	if ((status = request_firmware(&fw, mgp->fw_name, dev)) < 0) {
-		dev_err(dev, "Unable to load %s firmware image via hotplug\n",
-			mgp->fw_name);
 		status = -EINVAL;
 		goto abort_with_nothing;
 	}
@@ -1920,6 +1918,7 @@ myri10ge_phys_id(struct net_device *netdev, enum ethtool_phys_id_state state)
 }
 
 static const struct ethtool_ops myri10ge_ethtool_ops = {
+	.supported_coalesce_params = ETHTOOL_COALESCE_RX_USECS,
 	.get_drvinfo = myri10ge_get_drvinfo,
 	.get_coalesce = myri10ge_get_coalesce,
 	.set_coalesce = myri10ge_set_coalesce,

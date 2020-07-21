@@ -920,12 +920,8 @@ static int cx23885_load_firmware(struct cx23885_dev *dev)
 	retval = request_firmware(&firmware, CX23885_FIRM_IMAGE_NAME,
 				  &dev->pci->dev);
 
-	if (retval != 0) {
-		pr_err("ERROR: Hotplug firmware request failed (%s).\n",
-		       CX23885_FIRM_IMAGE_NAME);
-		pr_err("Please fix your hotplug setup, the board will not work without firmware loaded!\n");
+	if (retval != 0)
 		return -1;
-	}
 
 	if (firmware->size != CX23885_FIRM_IMAGE_SIZE) {
 		pr_err("ERROR: Firmware size mismatch (have %zu, expected %d)\n",
@@ -1545,7 +1541,7 @@ int cx23885_417_register(struct cx23885_dev *dev)
 	if (dev->tuner_type != TUNER_ABSENT)
 		dev->v4l_device->device_caps |= V4L2_CAP_TUNER;
 	err = video_register_device(dev->v4l_device,
-		VFL_TYPE_GRABBER, -1);
+		VFL_TYPE_VIDEO, -1);
 	if (err < 0) {
 		pr_info("%s: can't register mpeg device\n", dev->name);
 		return err;

@@ -30,7 +30,7 @@
 #if K1212_DEBUG_LEVEL > 0
 #define K1212_DEBUG_PRINTK(fmt,args...)	printk(KERN_DEBUG fmt,##args)
 #else
-#define K1212_DEBUG_PRINTK(fmt,...)
+#define K1212_DEBUG_PRINTK(fmt,...)	do { } while (0)
 #endif
 #if K1212_DEBUG_LEVEL > 1
 #define K1212_DEBUG_PRINTK_VERBOSE(fmt,args...)	printk(KERN_DEBUG fmt,##args)
@@ -2333,7 +2333,6 @@ static int snd_korg1212_create(struct snd_card *card, struct pci_dev *pci,
 
 	err = request_firmware(&dsp_code, "korg/k1212.dsp", &pci->dev);
 	if (err < 0) {
-		snd_printk(KERN_ERR "firmware not available\n");
 		snd_korg1212_free(korg1212);
 		return err;
 	}

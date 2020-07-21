@@ -983,11 +983,6 @@ static int cx231xx_load_firmware(struct cx231xx *dev)
 				  dev->dev);
 
 	if (retval != 0) {
-		dev_err(dev->dev,
-			"ERROR: Hotplug firmware request failed (%s).\n",
-			CX231xx_FIRM_IMAGE_NAME);
-		dev_err(dev->dev,
-			"Please fix your hotplug setup, the board will not work without firmware loaded!\n");
 		vfree(p_current_fw);
 		vfree(p_buffer);
 		return retval;
@@ -1790,7 +1785,7 @@ int cx231xx_417_register(struct cx231xx *dev)
 	dev->v4l_device.queue = q;
 
 	err = video_register_device(&dev->v4l_device,
-		VFL_TYPE_GRABBER, -1);
+		VFL_TYPE_VIDEO, -1);
 	if (err < 0) {
 		dprintk(3, "%s: can't register mpeg device\n", dev->name);
 		v4l2_ctrl_handler_free(&dev->mpeg_ctrl_handler.hdl);

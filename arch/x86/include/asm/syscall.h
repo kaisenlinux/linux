@@ -13,23 +13,15 @@
 #include <uapi/linux/audit.h>
 #include <linux/sched.h>
 #include <linux/err.h>
-#include <asm/asm-offsets.h>	/* For NR_syscalls */
+#include <linux/jump_label.h>
 #include <asm/thread_info.h>	/* for TS_COMPAT */
 #include <asm/unistd.h>
 
-#ifdef CONFIG_X86_64
-typedef asmlinkage long (*sys_call_ptr_t)(const struct pt_regs *);
-#else
-typedef asmlinkage long (*sys_call_ptr_t)(unsigned long, unsigned long,
-					  unsigned long, unsigned long,
-					  unsigned long, unsigned long);
-#endif /* CONFIG_X86_64 */
+typedef long (*sys_call_ptr_t)(const struct pt_regs *);
 extern const sys_call_ptr_t sys_call_table[];
 
 #if defined(CONFIG_X86_32)
 #define ia32_sys_call_table sys_call_table
-#define __NR_syscall_compat_max __NR_syscall_max
-#define IA32_NR_syscalls NR_syscalls
 #endif
 
 #if defined(CONFIG_IA32_EMULATION)
@@ -38,6 +30,18 @@ extern const sys_call_ptr_t ia32_sys_call_table[];
 
 #ifdef CONFIG_X86_X32_ABI
 extern const sys_call_ptr_t x32_sys_call_table[];
+#endif
+
+#if defined(CONFIG_X86_X32_ABI)
+#if defined(CONFIG_X86_X32_DISABLED)
+DECLARE_STATIC_KEY_FALSE(x32_enabled_skey);
+#define x32_enabled static_branch_unlikely(&x32_enabled_skey)
+#else
+DECLARE_STATIC_KEY_TRUE(x32_enabled_skey);
+#define x32_enabled static_branch_likely(&x32_enabled_skey)
+#endif
+#else
+#define x32_enabled 0
 #endif
 
 /*
@@ -168,6 +172,11 @@ static inline int syscall_get_arch(struct task_struct *task)
 		task->thread_info.status & TS_COMPAT)
 		? AUDIT_ARCH_I386 : AUDIT_ARCH_X86_64;
 }
+
+void do_syscall_64(unsigned long nr, struct pt_regs *regs);
+void do_int80_syscall_32(struct pt_regs *regs);
+long do_fast_syscall_32(struct pt_regs *regs);
+
 #endif	/* CONFIG_X86_32 */
 
 #endif	/* _ASM_X86_SYSCALL_H */

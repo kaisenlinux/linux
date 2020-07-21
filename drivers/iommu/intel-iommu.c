@@ -54,6 +54,9 @@
 #define CONTEXT_SIZE		VTD_PAGE_SIZE
 
 #define IS_GFX_DEVICE(pdev) ((pdev->class >> 16) == PCI_BASE_CLASS_DISPLAY)
+#define IS_INTGPU_DEVICE(pdev) (IS_GFX_DEVICE(pdev) &&		\
+				(pdev)->vendor == 0x8086 &&	\
+				pci_is_root_bus((pdev)->bus))
 #define IS_USB_DEVICE(pdev) ((pdev->class >> 8) == PCI_CLASS_SERIAL_USB)
 #define IS_ISA_DEVICE(pdev) ((pdev->class >> 8) == PCI_CLASS_BRIDGE_ISA)
 #define IS_AZALIA(pdev) ((pdev)->vendor == 0x8086 && (pdev)->device == 0x3a3e)
@@ -365,11 +368,7 @@ static int intel_iommu_attach_device(struct iommu_domain *domain,
 static phys_addr_t intel_iommu_iova_to_phys(struct iommu_domain *domain,
 					    dma_addr_t iova);
 
-#ifdef CONFIG_INTEL_IOMMU_DEFAULT_ON
-int dmar_disabled = 0;
-#else
-int dmar_disabled = 1;
-#endif /* CONFIG_INTEL_IOMMU_DEFAULT_ON */
+int dmar_disabled = IS_ENABLED(CONFIG_INTEL_IOMMU_DEFAULT_OFF);
 
 #ifdef CONFIG_INTEL_IOMMU_SCALABLE_MODE_DEFAULT_ON
 int intel_iommu_sm = 1;
@@ -381,6 +380,7 @@ int intel_iommu_enabled = 0;
 EXPORT_SYMBOL_GPL(intel_iommu_enabled);
 
 static int dmar_map_gfx = 1;
+static int dmar_map_intgpu = IS_ENABLED(CONFIG_INTEL_IOMMU_DEFAULT_ON);
 static int dmar_forcedac;
 static int intel_iommu_strict;
 static int intel_iommu_superpage = 1;
@@ -389,6 +389,7 @@ static int intel_no_bounce;
 
 #define IDENTMAP_GFX		2
 #define IDENTMAP_AZALIA		4
+#define IDENTMAP_INTGPU		8
 
 int intel_iommu_gfx_mapped;
 EXPORT_SYMBOL_GPL(intel_iommu_gfx_mapped);
@@ -459,6 +460,7 @@ static int __init intel_iommu_setup(char *str)
 	while (*str) {
 		if (!strncmp(str, "on", 2)) {
 			dmar_disabled = 0;
+			dmar_map_intgpu = 1;
 			pr_info("IOMMU enabled\n");
 		} else if (!strncmp(str, "off", 3)) {
 			dmar_disabled = 1;
@@ -467,6 +469,9 @@ static int __init intel_iommu_setup(char *str)
 		} else if (!strncmp(str, "igfx_off", 8)) {
 			dmar_map_gfx = 0;
 			pr_info("Disable GFX device mapping\n");
+		} else if (!strncmp(str, "intgpu_off", 8)) {
+			dmar_map_intgpu = 0;
+			pr_info("Disable integrated GPU device mapping\n");
 		} else if (!strncmp(str, "forcedac", 8)) {
 			pr_info("Forcing DAC for PCI devices\n");
 			dmar_forcedac = 1;
@@ -2518,9 +2523,6 @@ struct dmar_domain *find_domain(struct device *dev)
 	if (unlikely(attach_deferred(dev) || iommu_dummy(dev)))
 		return NULL;
 
-	if (dev_is_pci(dev))
-		dev = &pci_real_dma_dev(to_pci_dev(dev))->dev;
-
 	/* No lock here, assumes no domain exit in normal case */
 	info = dev->archdata.iommu;
 	if (likely(info))
@@ -2545,7 +2547,7 @@ dmar_search_domain_by_dev_info(int segment, int bus, int devfn)
 	struct device_domain_info *info;
 
 	list_for_each_entry(info, &device_domain_list, global)
-		if (info->iommu->segment == segment && info->bus == bus &&
+		if (info->segment == segment && info->bus == bus &&
 		    info->devfn == devfn)
 			return info;
 
@@ -2582,6 +2584,12 @@ static int domain_setup_first_level(struct intel_iommu *iommu,
 					     flags);
 }
 
+static bool dev_is_real_dma_subdevice(struct device *dev)
+{
+	return dev && dev_is_pci(dev) &&
+	       pci_real_dma_dev(to_pci_dev(dev)) != to_pci_dev(dev);
+}
+
 static struct dmar_domain *dmar_insert_one_dev_info(struct intel_iommu *iommu,
 						    int bus, int devfn,
 						    struct device *dev,
@@ -2596,8 +2604,18 @@ static struct dmar_domain *dmar_insert_one_dev_info(struct intel_iommu *iommu,
 	if (!info)
 		return NULL;
 
-	info->bus = bus;
-	info->devfn = devfn;
+	if (!dev_is_real_dma_subdevice(dev)) {
+		info->bus = bus;
+		info->devfn = devfn;
+		info->segment = iommu->segment;
+	} else {
+		struct pci_dev *pdev = to_pci_dev(dev);
+
+		info->bus = pdev->bus->number;
+		info->devfn = pdev->devfn;
+		info->segment = pci_domain_nr(pdev->bus);
+	}
+
 	info->ats_supported = info->pasid_supported = info->pri_supported = 0;
 	info->ats_enabled = info->pasid_enabled = info->pri_enabled = 0;
 	info->ats_qdep = 0;
@@ -2637,7 +2655,8 @@ static struct dmar_domain *dmar_insert_one_dev_info(struct intel_iommu *iommu,
 
 	if (!found) {
 		struct device_domain_info *info2;
-		info2 = dmar_search_domain_by_dev_info(iommu->segment, bus, devfn);
+		info2 = dmar_search_domain_by_dev_info(info->segment, info->bus,
+						       info->devfn);
 		if (info2) {
 			found      = info2->domain;
 			info2->dev = dev;
@@ -3049,6 +3068,9 @@ static int device_def_domain_type(struct device *dev)
 		if ((iommu_identity_mapping & IDENTMAP_GFX) && IS_GFX_DEVICE(pdev))
 			return IOMMU_DOMAIN_IDENTITY;
 
+		if ((iommu_identity_mapping & IDENTMAP_INTGPU) && IS_INTGPU_DEVICE(pdev))
+			return IOMMU_DOMAIN_IDENTITY;
+
 		/*
 		 * We want to start off with all devices in the 1:1 domain, and
 		 * take them out later if we find they can't access all of memory.
@@ -3425,6 +3447,9 @@ static int __init init_dmars(void)
 
 	if (!dmar_map_gfx)
 		iommu_identity_mapping |= IDENTMAP_GFX;
+
+	if (!dmar_map_intgpu)
+		iommu_identity_mapping |= IDENTMAP_INTGPU;
 
 	check_tylersburg_isoch();
 
@@ -5286,7 +5311,8 @@ static void __dmar_remove_one_dev_info(struct device_domain_info *info)
 					PASID_RID2PASID);
 
 		iommu_disable_dev_iotlb(info);
-		domain_context_clear(iommu, info->dev);
+		if (!dev_is_real_dma_subdevice(info->dev))
+			domain_context_clear(iommu, info->dev);
 		intel_pasid_free_table(info->dev);
 	}
 

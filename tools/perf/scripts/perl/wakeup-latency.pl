@@ -1,4 +1,3 @@
-#!/usr/bin/perl -w
 # SPDX-License-Identifier: GPL-2.0-only
 # (c) 2009, Tom Zanussi <tzanussi@gmail.com>
 
@@ -28,7 +27,7 @@ my $total_wakeups = 0;
 sub sched::sched_switch
 {
     my ($event_name, $context, $common_cpu, $common_secs, $common_nsecs,
-	$common_pid, $common_comm,
+	$common_pid, $common_comm, $common_callchain,
 	$prev_comm, $prev_pid, $prev_prio, $prev_state, $next_comm, $next_pid,
 	$next_prio) = @_;
 
@@ -51,7 +50,7 @@ sub sched::sched_switch
 sub sched::sched_wakeup
 {
     my ($event_name, $context, $common_cpu, $common_secs, $common_nsecs,
-	$common_pid, $common_comm,
+	$common_pid, $common_comm, $common_callchain,
 	$comm, $pid, $prio, $success, $target_cpu) = @_;
 
     $last_wakeup{$target_cpu}{ts} = nsecs($common_secs, $common_nsecs);
@@ -101,7 +100,7 @@ sub print_unhandled
 sub trace_unhandled
 {
     my ($event_name, $context, $common_cpu, $common_secs, $common_nsecs,
-	$common_pid, $common_comm) = @_;
+	$common_pid, $common_comm, $common_callchain) = @_;
 
     $unhandled{$event_name}++;
 }

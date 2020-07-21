@@ -1,7 +1,7 @@
 Section: kernel
 Priority: optional
-Maintainer: Kali Developers <devel@kali.org>
-Uploaders: Raphaël Hertzog <hertzog@debian.org>, Sophie Brun <sophie@offensive-security.com>
+Maintainer: Kevin Chevreuil - Kaisen <kaisen@kaisen-linux.org>
+Uploaders: Kevin Chevreuil - Kaisen <kaisen@kaisen-linux.org>
 Standards-Version: 4.2.0
 Build-Depends:
  debhelper-compat (= 12), dh-exec,
@@ -36,6 +36,6 @@ Build-Depends-Arch:
  rsync,
  lz4 [amd64 arm64] <!stage1 !pkg.linux.nokernel>
 Rules-Requires-Root: no
-Vcs-Git: https://gitlab.com/kalilinux/packages/linux.git
-Vcs-Browser: https://gitlab.com/kalilinux/packages/linux
+Vcs-Git: https://gitlab.com/kaisenlinux/packages/linux.git
+Vcs-Browser: https://gitlab.com/kaisenlinux/packages/linux
 Homepage: https://www.kernel.org/

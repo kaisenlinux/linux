@@ -49,7 +49,7 @@ struct orinoco_fw_header {
 	__le32 pdr_offset;      /* Offset to PDR data from eof header */
 	__le32 pri_offset;      /* Offset to primary plug data */
 	__le32 compat_offset;   /* Offset to compatibility data*/
-	char signature[0];      /* FW signature length headersize-20 */
+	char signature[];      /* FW signature length headersize-20 */
 } __packed;
 
 /* Check the range of various header entries. Return a pointer to a
@@ -132,7 +132,6 @@ orinoco_dl_firmware(struct orinoco_private *priv,
 		err = request_firmware(&fw_entry, firmware, priv->dev);
 
 		if (err) {
-			dev_err(dev, "Cannot find firmware %s\n", firmware);
 			err = -ENOENT;
 			goto free;
 		}
@@ -292,10 +291,8 @@ symbol_dl_firmware(struct orinoco_private *priv,
 	const struct firmware *fw_entry;
 
 	if (!orinoco_cached_fw_get(priv, true)) {
-		if (request_firmware(&fw_entry, fw->pri_fw, priv->dev) != 0) {
-			dev_err(dev, "Cannot find firmware: %s\n", fw->pri_fw);
+		if (request_firmware(&fw_entry, fw->pri_fw, priv->dev) != 0)
 			return -ENOENT;
-		}
 	} else
 		fw_entry = orinoco_cached_fw_get(priv, true);
 
@@ -311,10 +308,8 @@ symbol_dl_firmware(struct orinoco_private *priv,
 	}
 
 	if (!orinoco_cached_fw_get(priv, false)) {
-		if (request_firmware(&fw_entry, fw->sta_fw, priv->dev) != 0) {
-			dev_err(dev, "Cannot find firmware: %s\n", fw->sta_fw);
+		if (request_firmware(&fw_entry, fw->sta_fw, priv->dev) != 0)
 			return -ENOENT;
-		}
 	} else
 		fw_entry = orinoco_cached_fw_get(priv, false);
 

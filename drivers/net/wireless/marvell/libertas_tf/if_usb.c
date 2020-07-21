@@ -247,10 +247,10 @@ static void if_usb_disconnect(struct usb_interface *intf)
 
 	lbtf_deb_enter(LBTF_DEB_MAIN);
 
-	if_usb_reset_device(priv);
-
-	if (priv)
+	if (priv) {
+		if_usb_reset_device(priv);
 		lbtf_remove_card(priv);
+	}
 
 	/* Unlink and free urb */
 	if_usb_free(cardp);
@@ -817,8 +817,6 @@ static int if_usb_prog_firmware(struct lbtf_private *priv)
 	kernel_param_lock(THIS_MODULE);
 	ret = request_firmware(&cardp->fw, lbtf_fw_name, &cardp->udev->dev);
 	if (ret < 0) {
-		pr_err("request_firmware() failed with %#x\n", ret);
-		pr_err("firmware %s not found\n", lbtf_fw_name);
 		kernel_param_unlock(THIS_MODULE);
 		goto done;
 	}

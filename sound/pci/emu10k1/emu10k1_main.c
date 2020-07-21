@@ -873,10 +873,8 @@ static int snd_emu10k1_emu1010_init(struct snd_emu10k1 *emu)
 	dev_info(emu->card->dev, "emu1010: EMU_HANA_ID = 0x%x\n", reg);
 
 	err = snd_emu1010_load_firmware(emu, 0, &emu->firmware);
-	if (err < 0) {
-		dev_info(emu->card->dev, "emu1010: Loading Firmware failed\n");
+	if (err < 0)
 		return err;
-	}
 
 	/* ID, should read & 0x7f = 0x55 when FPGA programmed. */
 	snd_emu1010_fpga_read(emu, EMU_HANA_ID, &reg);
@@ -1789,6 +1787,7 @@ int snd_emu10k1_create(struct snd_card *card,
 	int idx, err;
 	int is_audigy;
 	size_t page_table_size;
+	__le32 *pgtbl;
 	unsigned int silent_page;
 	const struct snd_emu_chip_details *c;
 	static const struct snd_device_ops ops = {
@@ -2009,8 +2008,9 @@ int snd_emu10k1_create(struct snd_card *card,
 	/* Clear silent pages and set up pointers */
 	memset(emu->silent_page.area, 0, emu->silent_page.bytes);
 	silent_page = emu->silent_page.addr << emu->address_mode;
+	pgtbl = (__le32 *)emu->ptb_pages.area;
 	for (idx = 0; idx < (emu->address_mode ? MAXPAGES1 : MAXPAGES0); idx++)
-		((u32 *)emu->ptb_pages.area)[idx] = cpu_to_le32(silent_page | idx);
+		pgtbl[idx] = cpu_to_le32(silent_page | idx);
 
 	/* set up voice indices */
 	for (idx = 0; idx < NUM_G; idx++) {

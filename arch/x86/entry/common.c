@@ -34,6 +34,7 @@
 #include <asm/fpu/api.h>
 #include <asm/nospec-branch.h>
 #include <asm/io_bitmap.h>
+#include <asm/syscall.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/syscalls.h>
@@ -293,7 +294,8 @@ __visible void do_syscall_64(unsigned long nr, struct pt_regs *regs)
 		nr = array_index_nospec(nr, NR_syscalls);
 		regs->ax = sys_call_table[nr](regs);
 #ifdef CONFIG_X86_X32_ABI
-	} else if (likely((nr & __X32_SYSCALL_BIT) &&
+	} else if (x32_enabled &&
+		   likely((nr & __X32_SYSCALL_BIT) &&
 			  (nr & ~__X32_SYSCALL_BIT) < X32_NR_syscalls)) {
 		nr = array_index_nospec(nr & ~__X32_SYSCALL_BIT,
 					X32_NR_syscalls);
@@ -333,20 +335,7 @@ static __always_inline void do_syscall_32_irqs_on(struct pt_regs *regs)
 
 	if (likely(nr < IA32_NR_syscalls)) {
 		nr = array_index_nospec(nr, IA32_NR_syscalls);
-#ifdef CONFIG_IA32_EMULATION
 		regs->ax = ia32_sys_call_table[nr](regs);
-#else
-		/*
-		 * It's possible that a 32-bit syscall implementation
-		 * takes a 64-bit parameter but nonetheless assumes that
-		 * the high bits are zero.  Make sure we zero-extend all
-		 * of the args.
-		 */
-		regs->ax = ia32_sys_call_table[nr](
-			(unsigned int)regs->bx, (unsigned int)regs->cx,
-			(unsigned int)regs->dx, (unsigned int)regs->si,
-			(unsigned int)regs->di, (unsigned int)regs->bp);
-#endif /* CONFIG_IA32_EMULATION */
 	}
 
 	syscall_return_slowpath(regs);
@@ -438,3 +427,8 @@ __visible long do_fast_syscall_32(struct pt_regs *regs)
 #endif
 }
 #endif
+
+SYSCALL_DEFINE0(ni_syscall)
+{
+	return -ENOSYS;
+}

@@ -65,6 +65,7 @@ int do_truncate(struct dentry *dentry, loff_t length, unsigned int time_attrs,
 	inode_unlock(dentry->d_inode);
 	return ret;
 }
+EXPORT_SYMBOL_GPL(do_truncate);
 
 long vfs_truncate(const struct path *path, loff_t length)
 {
@@ -1046,8 +1047,10 @@ inline int build_open_flags(const struct open_how *how, struct open_flags *op)
 
 	if (flags & O_CREAT) {
 		op->intent |= LOOKUP_CREATE;
-		if (flags & O_EXCL)
+		if (flags & O_EXCL) {
 			op->intent |= LOOKUP_EXCL;
+			flags |= O_NOFOLLOW;
+		}
 	}
 
 	if (flags & O_DIRECTORY)

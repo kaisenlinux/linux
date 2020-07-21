@@ -1,4 +1,3 @@
-#!/usr/bin/perl -w
 # SPDX-License-Identifier: GPL-2.0-only
 # (c) 2009, Tom Zanussi <tzanussi@gmail.com>
 
@@ -28,7 +27,7 @@ my %writes;
 sub syscalls::sys_enter_read
 {
     my ($event_name, $context, $common_cpu, $common_secs, $common_nsecs,
-	$common_pid, $common_comm, $nr, $fd, $buf, $count) = @_;
+	$common_pid, $common_comm, $common_callchain, $nr, $fd, $buf, $count) = @_;
 
     if ($common_comm eq $for_comm) {
 	$reads{$fd}{bytes_requested} += $count;
@@ -39,7 +38,7 @@ sub syscalls::sys_enter_read
 sub syscalls::sys_enter_write
 {
     my ($event_name, $context, $common_cpu, $common_secs, $common_nsecs,
-	$common_pid, $common_comm, $nr, $fd, $buf, $count) = @_;
+	$common_pid, $common_comm, $common_callchain, $nr, $fd, $buf, $count) = @_;
 
     if ($common_comm eq $for_comm) {
 	$writes{$fd}{bytes_written} += $count;
@@ -98,7 +97,7 @@ sub print_unhandled
 sub trace_unhandled
 {
     my ($event_name, $context, $common_cpu, $common_secs, $common_nsecs,
-	$common_pid, $common_comm) = @_;
+	$common_pid, $common_comm, $common_callchain) = @_;
 
     $unhandled{$event_name}++;
 }

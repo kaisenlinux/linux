@@ -1230,6 +1230,7 @@ static int nr_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 #ifdef CONFIG_PROC_FS
 
 static void *nr_info_start(struct seq_file *seq, loff_t *pos)
+	__acquires(&nr_list_lock)
 {
 	spin_lock_bh(&nr_list_lock);
 	return seq_hlist_start_head(&nr_list, *pos);
@@ -1241,6 +1242,7 @@ static void *nr_info_next(struct seq_file *seq, void *v, loff_t *pos)
 }
 
 static void nr_info_stop(struct seq_file *seq, void *v)
+	__releases(&nr_list_lock)
 {
 	spin_unlock_bh(&nr_list_lock);
 }
@@ -1463,7 +1465,7 @@ MODULE_PARM_DESC(nr_ndevs, "number of NET/ROM devices");
 MODULE_AUTHOR("Jonathan Naylor G4KLX <g4klx@g4klx.demon.co.uk>");
 MODULE_DESCRIPTION("The amateur radio NET/ROM network and transport layer protocol");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS_NETPROTO(PF_NETROM);
+/* MODULE_ALIAS_NETPROTO(PF_NETROM); */
 
 static void __exit nr_exit(void)
 {

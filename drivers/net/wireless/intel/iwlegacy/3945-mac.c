@@ -228,9 +228,7 @@ il3945_set_dynamic_key(struct il_priv *il, struct ieee80211_key_conf *keyconf,
 static int
 il3945_remove_static_key(struct il_priv *il)
 {
-	int ret = -EOPNOTSUPP;
-
-	return ret;
+	return -EOPNOTSUPP;
 }
 
 static int
@@ -1839,7 +1837,6 @@ il3945_read_ucode(struct il_priv *il)
 		sprintf(buf, "%s%u%s", name_pre, idx, ".ucode");
 		ret = request_firmware(&ucode_raw, buf, &il->pci_dev->dev);
 		if (ret < 0) {
-			IL_ERR("%s firmware file req failed: %d\n", buf, ret);
 			if (ret == -ENOENT)
 				continue;
 			else

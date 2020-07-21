@@ -16,6 +16,7 @@
 #include <linux/pci.h>
 #include <linux/root_dev.h>
 #include <linux/sfi.h>
+#include <linux/hugetlb.h>
 #include <linux/tboot.h>
 #include <linux/usb/xhci-dbgp.h>
 
@@ -64,7 +65,6 @@ RESERVE_BRK(dmi_alloc, 65536);
  * at link time, with RESERVE_BRK*() facility reserving additional
  * chunks.
  */
-static __initdata
 unsigned long _brk_start = (unsigned long)__brk_base;
 unsigned long _brk_end   = (unsigned long)__brk_base;
 
@@ -973,6 +973,8 @@ void __init setup_arch(char **cmdline_p)
 	if (efi_enabled(EFI_BOOT))
 		efi_init();
 
+	efi_set_secure_boot(boot_params.secure_boot);
+
 	dmi_setup();
 
 	/*
@@ -1124,20 +1126,6 @@ void __init setup_arch(char **cmdline_p)
 	/* Allocate bigger log buffer */
 	setup_log_buf(1);
 
-	if (efi_enabled(EFI_BOOT)) {
-		switch (boot_params.secure_boot) {
-		case efi_secureboot_mode_disabled:
-			pr_info("Secure boot disabled\n");
-			break;
-		case efi_secureboot_mode_enabled:
-			pr_info("Secure boot enabled\n");
-			break;
-		default:
-			pr_info("Secure boot could not be determined\n");
-			break;
-		}
-	}
-
 	reserve_initrd();
 
 	acpi_table_upgrade();
@@ -1157,6 +1145,9 @@ void __init setup_arch(char **cmdline_p)
 
 	initmem_init();
 	dma_contiguous_reserve(max_pfn_mapped << PAGE_SHIFT);
+
+	if (boot_cpu_has(X86_FEATURE_GBPAGES))
+		hugetlb_cma_reserve(PUD_SHIFT - PAGE_SHIFT);
 
 	/*
 	 * Reserve memory for crash kernel after SRAT is parsed so that it

@@ -23,13 +23,13 @@ static const enum lockdown_reason lockdown_levels[] = {LOCKDOWN_NONE,
 /*
  * Put the kernel into lock-down mode.
  */
-static int lock_kernel_down(const char *where, enum lockdown_reason level)
+int lock_kernel_down(const char *where, enum lockdown_reason level)
 {
 	if (kernel_locked_down >= level)
 		return -EPERM;
 
 	kernel_locked_down = level;
-	pr_notice("Kernel is locked down from %s; see man kernel_lockdown.7\n",
+	pr_notice("Kernel is locked down from %s; see https://wiki.debian.org/SecureBoot\n",
 		  where);
 	return 0;
 }
@@ -63,7 +63,7 @@ static int lockdown_is_locked_down(enum lockdown_reason what)
 
 	if (kernel_locked_down >= what) {
 		if (lockdown_reasons[what])
-			pr_notice("Lockdown: %s: %s is restricted; see man kernel_lockdown.7\n",
+			pr_notice("Lockdown: %s: %s is restricted; see https://wiki.debian.org/SecureBoot\n",
 				  current->comm, lockdown_reasons[what]);
 		return -EPERM;
 	}
@@ -150,7 +150,7 @@ static int __init lockdown_secfs_init(void)
 {
 	struct dentry *dentry;
 
-	dentry = securityfs_create_file("lockdown", 0600, NULL, NULL,
+	dentry = securityfs_create_file("lockdown", 0644, NULL, NULL,
 					&lockdown_ops);
 	return PTR_ERR_OR_ZERO(dentry);
 }

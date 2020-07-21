@@ -849,8 +849,8 @@ EXPORT_SYMBOL(generic_splice_sendpage);
 /*
  * Attempt to initiate a splice from pipe to file.
  */
-static long do_splice_from(struct pipe_inode_info *pipe, struct file *out,
-			   loff_t *ppos, size_t len, unsigned int flags)
+long do_splice_from(struct pipe_inode_info *pipe, struct file *out,
+		    loff_t *ppos, size_t len, unsigned int flags)
 {
 	ssize_t (*splice_write)(struct pipe_inode_info *, struct file *,
 				loff_t *, size_t, unsigned int);
@@ -862,13 +862,14 @@ static long do_splice_from(struct pipe_inode_info *pipe, struct file *out,
 
 	return splice_write(pipe, out, ppos, len, flags);
 }
+EXPORT_SYMBOL_GPL(do_splice_from);
 
 /*
  * Attempt to initiate a splice from a file to a pipe.
  */
-static long do_splice_to(struct file *in, loff_t *ppos,
-			 struct pipe_inode_info *pipe, size_t len,
-			 unsigned int flags)
+long do_splice_to(struct file *in, loff_t *ppos,
+		  struct pipe_inode_info *pipe, size_t len,
+		  unsigned int flags)
 {
 	ssize_t (*splice_read)(struct file *, loff_t *,
 			       struct pipe_inode_info *, size_t, unsigned int);
@@ -891,6 +892,7 @@ static long do_splice_to(struct file *in, loff_t *ppos,
 
 	return splice_read(in, ppos, pipe, len, flags);
 }
+EXPORT_SYMBOL_GPL(do_splice_to);
 
 /**
  * splice_direct_to_actor - splices data directly between two non-pipes
@@ -1109,14 +1111,18 @@ static int splice_pipe_to_pipe(struct pipe_inode_info *ipipe,
 /*
  * Determine where to splice to/from.
  */
-static long do_splice(struct file *in, loff_t __user *off_in,
-		      struct file *out, loff_t __user *off_out,
-		      size_t len, unsigned int flags)
+long do_splice(struct file *in, loff_t __user *off_in,
+		struct file *out, loff_t __user *off_out,
+		size_t len, unsigned int flags)
 {
 	struct pipe_inode_info *ipipe;
 	struct pipe_inode_info *opipe;
 	loff_t offset;
 	long ret;
+
+	if (unlikely(!(in->f_mode & FMODE_READ) ||
+		     !(out->f_mode & FMODE_WRITE)))
+		return -EBADF;
 
 	ipipe = get_pipe_info(in);
 	opipe = get_pipe_info(out);
@@ -1124,12 +1130,6 @@ static long do_splice(struct file *in, loff_t __user *off_in,
 	if (ipipe && opipe) {
 		if (off_in || off_out)
 			return -ESPIPE;
-
-		if (!(in->f_mode & FMODE_READ))
-			return -EBADF;
-
-		if (!(out->f_mode & FMODE_WRITE))
-			return -EBADF;
 
 		/* Splicing to self would be fun, but... */
 		if (ipipe == opipe)
@@ -1152,9 +1152,6 @@ static long do_splice(struct file *in, loff_t __user *off_in,
 		} else {
 			offset = out->f_pos;
 		}
-
-		if (unlikely(!(out->f_mode & FMODE_WRITE)))
-			return -EBADF;
 
 		if (unlikely(out->f_flags & O_APPEND))
 			return -EINVAL;
@@ -1440,15 +1437,11 @@ SYSCALL_DEFINE6(splice, int, fd_in, loff_t __user *, off_in,
 	error = -EBADF;
 	in = fdget(fd_in);
 	if (in.file) {
-		if (in.file->f_mode & FMODE_READ) {
-			out = fdget(fd_out);
-			if (out.file) {
-				if (out.file->f_mode & FMODE_WRITE)
-					error = do_splice(in.file, off_in,
-							  out.file, off_out,
-							  len, flags);
-				fdput(out);
-			}
+		out = fdget(fd_out);
+		if (out.file) {
+			error = do_splice(in.file, off_in, out.file, off_out,
+					  len, flags);
+			fdput(out);
 		}
 		fdput(in);
 	}
@@ -1503,7 +1496,7 @@ static int opipe_prep(struct pipe_inode_info *pipe, unsigned int flags)
 	 * Check pipe occupancy without the inode lock first. This function
 	 * is speculative anyways, so missing one is ok.
 	 */
-	if (pipe_full(pipe->head, pipe->tail, pipe->max_usage))
+	if (!pipe_full(pipe->head, pipe->tail, pipe->max_usage))
 		return 0;
 
 	ret = 0;
@@ -1770,6 +1763,10 @@ static long do_tee(struct file *in, struct file *out, size_t len,
 	struct pipe_inode_info *opipe = get_pipe_info(out);
 	int ret = -EINVAL;
 
+	if (unlikely(!(in->f_mode & FMODE_READ) ||
+		     !(out->f_mode & FMODE_WRITE)))
+		return -EBADF;
+
 	/*
 	 * Duplicate the contents of ipipe to opipe without actually
 	 * copying the data.
@@ -1795,7 +1792,7 @@ static long do_tee(struct file *in, struct file *out, size_t len,
 
 SYSCALL_DEFINE4(tee, int, fdin, int, fdout, size_t, len, unsigned int, flags)
 {
-	struct fd in;
+	struct fd in, out;
 	int error;
 
 	if (unlikely(flags & ~SPLICE_F_ALL))
@@ -1807,14 +1804,10 @@ SYSCALL_DEFINE4(tee, int, fdin, int, fdout, size_t, len, unsigned int, flags)
 	error = -EBADF;
 	in = fdget(fdin);
 	if (in.file) {
-		if (in.file->f_mode & FMODE_READ) {
-			struct fd out = fdget(fdout);
-			if (out.file) {
-				if (out.file->f_mode & FMODE_WRITE)
-					error = do_tee(in.file, out.file,
-							len, flags);
-				fdput(out);
-			}
+		out = fdget(fdout);
+		if (out.file) {
+			error = do_tee(in.file, out.file, len, flags);
+			fdput(out);
 		}
  		fdput(in);
  	}

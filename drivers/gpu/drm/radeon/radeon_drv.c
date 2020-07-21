@@ -49,6 +49,8 @@
 #include <drm/drm_probe_helper.h>
 #include <drm/drm_vblank.h>
 #include <drm/radeon_drm.h>
+#include <linux/namei.h>
+#include <linux/path.h>
 
 #include "radeon_drv.h"
 
@@ -120,9 +122,6 @@ void radeon_driver_postclose_kms(struct drm_device *dev,
 int radeon_suspend_kms(struct drm_device *dev, bool suspend,
 		       bool fbcon, bool freeze);
 int radeon_resume_kms(struct drm_device *dev, bool resume, bool fbcon);
-u32 radeon_get_vblank_counter_kms(struct drm_device *dev, unsigned int pipe);
-int radeon_enable_vblank_kms(struct drm_device *dev, unsigned int pipe);
-void radeon_disable_vblank_kms(struct drm_device *dev, unsigned int pipe);
 void radeon_driver_irq_preinstall_kms(struct drm_device *dev);
 int radeon_driver_irq_postinstall_kms(struct drm_device *dev);
 void radeon_driver_irq_uninstall_kms(struct drm_device *dev);
@@ -322,6 +321,28 @@ static struct drm_driver kms_driver;
 
 bool radeon_device_is_virtual(void);
 
+/* Test that /lib/firmware/radeon is a directory (or symlink to a
+ * directory).  We could try to match the udev search path, but let's
+ * keep it simple.
+ */
+static bool radeon_firmware_installed(void)
+{
+#if IS_BUILTIN(CONFIG_DRM_RADEON)
+	/* It may be too early to tell.  Assume it's there. */
+	return true;
+#else
+	struct path path;
+
+	if (kern_path("/lib/firmware/radeon", LOOKUP_DIRECTORY | LOOKUP_FOLLOW,
+		      &path) == 0) {
+		path_put(&path);
+		return true;
+	}
+
+	return false;
+#endif
+}
+
 static int radeon_pci_probe(struct pci_dev *pdev,
 			    const struct pci_device_id *ent)
 {
@@ -361,6 +382,13 @@ static int radeon_pci_probe(struct pci_dev *pdev,
 
 	if (vga_switcheroo_client_probe_defer(pdev))
 		return -EPROBE_DEFER;
+
+	if ((ent->driver_data & RADEON_FAMILY_MASK) >= CHIP_R600 &&
+	    !radeon_firmware_installed()) {
+		DRM_ERROR("radeon kernel modesetting for R600 or later requires firmware installed\n");
+		pr_err_once("See https://wiki.debian.org/Firmware for information about missing firmware\n");
+		return -ENODEV;
+	}
 
 	/* Get rid of things like offb */
 	ret = drm_fb_helper_remove_conflicting_pci_framebuffers(pdev, "radeondrmfb");
@@ -602,16 +630,6 @@ static const struct file_operations radeon_driver_kms_fops = {
 #endif
 };
 
-static bool
-radeon_get_crtc_scanout_position(struct drm_device *dev, unsigned int pipe,
-				 bool in_vblank_irq, int *vpos, int *hpos,
-				 ktime_t *stime, ktime_t *etime,
-				 const struct drm_display_mode *mode)
-{
-	return radeon_get_crtc_scanoutpos(dev, pipe, 0, vpos, hpos,
-					  stime, etime, mode);
-}
-
 static struct drm_driver kms_driver = {
 	.driver_features =
 	    DRIVER_GEM | DRIVER_RENDER,
@@ -620,11 +638,6 @@ static struct drm_driver kms_driver = {
 	.postclose = radeon_driver_postclose_kms,
 	.lastclose = radeon_driver_lastclose_kms,
 	.unload = radeon_driver_unload_kms,
-	.get_vblank_counter = radeon_get_vblank_counter_kms,
-	.enable_vblank = radeon_enable_vblank_kms,
-	.disable_vblank = radeon_disable_vblank_kms,
-	.get_vblank_timestamp = drm_calc_vbltimestamp_from_scanoutpos,
-	.get_scanout_position = radeon_get_crtc_scanout_position,
 	.irq_preinstall = radeon_driver_irq_preinstall_kms,
 	.irq_postinstall = radeon_driver_irq_postinstall_kms,
 	.irq_uninstall = radeon_driver_irq_uninstall_kms,

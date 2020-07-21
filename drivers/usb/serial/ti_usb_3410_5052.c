@@ -219,7 +219,7 @@ struct ti_write_data_bytes {
 	u8	bDataCounter;
 	__be16	wBaseAddrHi;
 	__be16	wBaseAddrLo;
-	u8	bData[0];
+	u8	bData[];
 } __packed;
 
 struct ti_read_data_request {
@@ -234,7 +234,7 @@ struct ti_read_data_bytes {
 	__u8	bCmdCode;
 	__u8	bModuleId;
 	__u8	bErrorCode;
-	__u8	bData[0];
+	__u8	bData[];
 } __packed;
 
 /* Interrupt struct */
@@ -1663,10 +1663,8 @@ static int ti_download_firmware(struct ti_device *tdev)
 	}
 
 check_firmware:
-	if (status) {
-		dev_err(&dev->dev, "%s - firmware not found\n", __func__);
+	if (status)
 		return -ENOENT;
-	}
 	if (fw_p->size > TI_FIRMWARE_BUF_SIZE) {
 		dev_err(&dev->dev, "%s - firmware too large %zu\n", __func__, fw_p->size);
 		release_firmware(fw_p);

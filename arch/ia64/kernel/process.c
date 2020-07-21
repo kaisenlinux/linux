@@ -34,6 +34,7 @@
 #include <linux/utsname.h>
 #include <linux/tracehook.h>
 #include <linux/rcupdate.h>
+#include <generated/package.h>
 
 #include <asm/cpu.h>
 #include <asm/delay.h>
@@ -104,9 +105,9 @@ show_regs (struct pt_regs *regs)
 	print_modules();
 	printk("\n");
 	show_regs_print_info(KERN_DEFAULT);
-	printk("psr : %016lx ifs : %016lx ip  : [<%016lx>]    %s (%s)\n",
+	printk("psr : %016lx ifs : %016lx ip  : [<%016lx>]    %s (%s%s)\n",
 	       regs->cr_ipsr, regs->cr_ifs, ip, print_tainted(),
-	       init_utsname()->release);
+	       init_utsname()->release, LINUX_PACKAGE_ID);
 	printk("ip is at %pS\n", (void *)ip);
 	printk("unat: %016lx pfs : %016lx rsc : %016lx\n",
 	       regs->ar_unat, regs->ar_pfs, regs->ar_rsc);
@@ -646,14 +647,8 @@ cpu_halt (void)
 
 void machine_shutdown(void)
 {
-#ifdef CONFIG_HOTPLUG_CPU
-	int cpu;
+	smp_shutdown_nonboot_cpus(reboot_cpu);
 
-	for_each_online_cpu(cpu) {
-		if (cpu != smp_processor_id())
-			cpu_down(cpu);
-	}
-#endif
 #ifdef CONFIG_KEXEC
 	kexec_disable_iosapic();
 #endif
@@ -681,3 +676,4 @@ machine_power_off (void)
 	machine_halt();
 }
 
+EXPORT_SYMBOL(ia64_delay_loop);

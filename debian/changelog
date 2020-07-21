@@ -1,10 +1,114 @@
-linux (5.6.14-1kaisen1) kaisen-devel; urgency=medium
+linux (5.7.6-1kaisen1) kaisen-testing; urgency=medium
+
+  * Import new upstream release
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisen-linux.org>  Tue, 21 Jul 2020 20:44:52 +0200
+
+linux (5.7.6-1) unstable; urgency=medium
+
+  * New upstream release: https://kernelnewbies.org/Linux_5.7
+    - [x86] syscalls: Revert "x86/syscalls: Make __X32_SYSCALL_BIT be unsigned
+      long" (Closes: #954294)
+  * New upstream stable update:
+    https://www.kernel.org/pub/linux/kernel/v5.x/ChangeLog-5.7.1
+    https://www.kernel.org/pub/linux/kernel/v5.x/ChangeLog-5.7.2
+    - vt: keyboard: avoid signed integer overflow in k_ascii (CVE-2020-13974)
+    https://www.kernel.org/pub/linux/kernel/v5.x/ChangeLog-5.7.3
+    - [x86] speculation: Prevent rogue cross-process SSBD shutdown
+      (CVE-2020-10766)
+    - [x86] speculation: Avoid force-disabling IBPB based on STIBP and
+      enhanced IBRS. (CVE-2020-10767)
+    - [x86] speculation: PR_SPEC_FORCE_DISABLE enforcement for indirect
+      branches. (CVE-2020-10768)
+    https://www.kernel.org/pub/linux/kernel/v5.x/ChangeLog-5.7.4
+    https://www.kernel.org/pub/linux/kernel/v5.x/ChangeLog-5.7.5
+    https://www.kernel.org/pub/linux/kernel/v5.x/ChangeLog-5.7.6
+
+  [ Ben Hutchings ]
+  * fs: Enable EXFAT_FS as module (Closes: #959781)
+  * Fix conversion of meta-package doc directories to symlinks
+    (Closes: #942861)
+
+  [ Vagrant Cascadian ]
+  * [arm64] Enable DRM_ANALOGIX_ANX6345 as a module.
+  * [arm64] Add analogix-anx6345, pwm-sun4i, sun4i-drm and sun8i-mixer to
+    fb-modules udeb.
+
+  [ Helge Deller ]
+  * [hppa] Don't run dh_strip on vmlinuz (Closes: #961299)
+
+  [ YunQiang Su ]
+  * [mips/loongson-3] Enable SERIAL_OF_PLATFORM and OF (Closes: 961328)
+
+  [ Aurelien Jarno ]
+  * Enable CONFIG_NVME_HWMON (Closes: #961823)
+
+  [ Romain Perier ]
+  * [arm64] Enable PCIE_BRCMSTB
+  * [arm64] Enable BCM2711_THERMAL
+
+  [ Salvatore Bonaccorso ]
+  * nfsd: apply umask on fs without ACL support (Closes: #962254)
+  * [rt] Add new signing key for Tom Zanussi
+  * Set ABI to 1
+  * [arm64] Remove explicit setting of CONFIG_HNS
+  * debian/config: Clean up with the help of kconfigeditor2
+
+  [ Gianfranco Costamagna ]
+  * [x86] Enable VBOXSF_FS as a module (Closes: #961516)
+
+ -- Salvatore Bonaccorso <carnil@debian.org>  Wed, 24 Jun 2020 20:56:57 +0200
+
+linux (5.7~rc5-1~exp1) experimental; urgency=medium
+
+  * New upstream release candidate
+
+  [ Romain Perier ]
+  * Enable support for fsverity
+
+  [ Ben Hutchings ]
+  * [rt] Disable until it is updated for 5.5 or later
+  * lockdown: Update Secure Boot support patches for 5.7
+  * [amd64] Update "x86: Make x32 syscall support conditional ..." for 5.7
+  * Update "tools/perf: pmu-events: Fix reproducibility" for 5.7
+
+ -- Ben Hutchings <benh@debian.org>  Sun, 10 May 2020 23:42:53 +0100
+
+linux (5.6.14-2kali1) kali-experimental; urgency=medium
 
   * Sync with Debian
-  * Import new upstream
-  * Keep Debian Linux config
 
- -- Kevin Chevreuil - Kaisen <kaisen@kaisen-linux.org>  Thu, 04 Jun 2020 21:06:26 +0200
+ -- Sophie Brun <sophie@offensive-security.com>  Wed, 10 Jun 2020 17:08:39 +0200
+
+linux (5.6.14-2) unstable; urgency=medium
+
+  [ Vagrant Cascadian ]
+  * [arm64] Add pwm-sun4i to fb-modules udeb.
+
+  [ Salvatore Bonaccorso ]
+  * kernel/relay.c: handle alloc_percpu returning NULL in relay_open
+    (CVE-2019-19462)
+  * fs/binfmt_elf.c: allocate initialized memory in fill_thread_core_info()
+    (CVE-2020-10732)
+  * mm: Fix mremap not considering huge pmd devmap (CVE-2020-10757)
+
+  [ Ben Hutchings ]
+  * [x86] Add support for mitigation of Special Register Buffer Data Sampling
+    (SRBDS) (CVE-2020-0543):
+    - x86/cpu: Add 'table' argument to cpu_matches()
+    - x86/speculation: Add Special Register Buffer Data Sampling (SRBDS)
+      mitigation
+    - x86/speculation: Add SRBDS vulnerability and mitigation documentation
+    - x86/speculation: Add Ivy Bridge to affected list
+  * [x86] speculation: Do not match steppings, to avoid an ABI change
+
+ -- Ben Hutchings <benh@debian.org>  Tue, 09 Jun 2020 18:50:00 +0100
+
+linux (5.6.14-1kali1) kali-experimental; urgency=medium
+
+  * Sync with Debian
+
+ -- Sophie Brun <sophie@offensive-security.com>  Mon, 25 May 2020 10:37:12 +0200
 
 linux (5.6.14-1) unstable; urgency=medium
 

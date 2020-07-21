@@ -1649,11 +1649,11 @@ static int s2255_probe_v4l(struct s2255_dev *dev)
 		video_set_drvdata(&vc->vdev, vc);
 		if (video_nr == -1)
 			ret = video_register_device(&vc->vdev,
-						    VFL_TYPE_GRABBER,
+						    VFL_TYPE_VIDEO,
 						    video_nr);
 		else
 			ret = video_register_device(&vc->vdev,
-						    VFL_TYPE_GRABBER,
+						    VFL_TYPE_VIDEO,
 						    cur_nr + i);
 
 		if (ret) {
@@ -2278,10 +2278,8 @@ static int s2255_probe(struct usb_interface *interface,
 	}
 	/* load the first chunk */
 	if (request_firmware(&dev->fw_data->fw,
-			     FIRMWARE_FILE_NAME, &dev->udev->dev)) {
-		dev_err(&interface->dev, "sensoray 2255 failed to get firmware\n");
+			     FIRMWARE_FILE_NAME, &dev->udev->dev))
 		goto errorREQFW;
-	}
 	/* check the firmware is valid */
 	fw_size = dev->fw_data->fw->size;
 	pdata = (__le32 *) &dev->fw_data->fw->data[fw_size - 8];

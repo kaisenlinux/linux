@@ -3353,7 +3353,8 @@ snd_hdsp_proc_read(struct snd_info_entry *entry, struct snd_info_buffer *buffer)
 				return;
 			}
 		} else {
-			int err = -EINVAL;
+			int err;
+
 			err = hdsp_request_fw_loader(hdsp);
 			if (err < 0) {
 				snd_iprintf(buffer,
@@ -5111,11 +5112,8 @@ static int hdsp_request_fw_loader(struct hdsp *hdsp)
 		return -EINVAL;
 	}
 
-	if (request_firmware(&fw, fwfile, &hdsp->pci->dev)) {
-		dev_err(hdsp->card->dev,
-			"cannot load firmware %s\n", fwfile);
+	if (request_firmware(&fw, fwfile, &hdsp->pci->dev))
 		return -ENOENT;
-	}
 	if (fw->size < HDSP_FIRMWARE_SIZE) {
 		dev_err(hdsp->card->dev,
 			"too short firmware size %d (expected %d)\n",

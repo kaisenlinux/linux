@@ -357,11 +357,8 @@ static unsigned char *add_mcs(unsigned char *bits, int bitrate,
 		}
 		err = request_firmware(&fw, fw_name[predef], &pdev->dev);
 		platform_device_unregister(pdev);
-		if (err) {
-			printk(KERN_ERR "Failed to load firmware \"%s\"\n",
-			       fw_name[predef]);
+		if (err)
 			return NULL;
-		}
 		if (fw->size != YAM_FPGA_SIZE) {
 			printk(KERN_ERR "Bogus length %zu in firmware \"%s\"\n",
 			       fw->size, fw_name[predef]);
@@ -1133,6 +1130,7 @@ static int __init yam_init_driver(void)
 		err = register_netdev(dev);
 		if (err) {
 			printk(KERN_WARNING "yam: cannot register net device %s\n", dev->name);
+			free_netdev(dev);
 			goto error;
 		}
 		yam_devs[i] = dev;

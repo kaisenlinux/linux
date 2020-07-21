@@ -1333,9 +1333,8 @@ static int check_version(const struct load_info *info,
 		goto bad_version;
 	}
 
-	/* Broken toolchain. Warn once, then let it go.. */
-	pr_warn_once("%s: no symbol version for %s\n", info->name, symname);
-	return 1;
+	pr_warn("%s: no symbol version for %s\n", info->name, symname);
+	return 0;
 
 bad_version:
 	pr_warn("%s: disagrees about version of symbol %s\n",
@@ -1515,7 +1514,7 @@ struct module_sect_attr {
 struct module_sect_attrs {
 	struct attribute_group grp;
 	unsigned int nsections;
-	struct module_sect_attr attrs[0];
+	struct module_sect_attr attrs[];
 };
 
 static ssize_t module_sect_show(struct module_attribute *mattr,
@@ -1608,7 +1607,7 @@ static void remove_sect_attrs(struct module *mod)
 struct module_notes_attrs {
 	struct kobject *dir;
 	unsigned int notes;
-	struct bin_attribute attrs[0];
+	struct bin_attribute attrs[];
 };
 
 static ssize_t module_notes_read(struct file *filp, struct kobject *kobj,
@@ -4355,6 +4354,7 @@ static int modules_open(struct inode *inode, struct file *file)
 }
 
 static const struct proc_ops modules_proc_ops = {
+	.proc_flags	= PROC_ENTRY_PERMANENT,
 	.proc_open	= modules_open,
 	.proc_read	= seq_read,
 	.proc_lseek	= seq_lseek,

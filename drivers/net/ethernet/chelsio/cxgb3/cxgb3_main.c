@@ -105,7 +105,6 @@ static const struct pci_device_id cxgb3_pci_tbl[] = {
 MODULE_DESCRIPTION(DRV_DESC);
 MODULE_AUTHOR("Chelsio Communications");
 MODULE_LICENSE("Dual BSD/GPL");
-MODULE_VERSION(DRV_VERSION);
 MODULE_DEVICE_TABLE(pci, cxgb3_pci_tbl);
 
 static int dflt_msg_enable = DFLT_MSG_ENABLE;
@@ -1037,12 +1036,8 @@ int t3_get_edc_fw(struct cphy *phy, int edc_idx, int size)
 	fw_name = get_edc_fw_name(edc_idx);
 	if (fw_name)
 		ret = request_firmware(&fw, fw_name, &adapter->pdev->dev);
-	if (ret < 0) {
-		dev_err(&adapter->pdev->dev,
-			"could not upgrade firmware: unable to load %s\n",
-			fw_name);
+	if (ret)
 		return ret;
-	}
 
 	/* check size, take checksum in account */
 	if (fw->size > size + 4) {
@@ -1079,11 +1074,8 @@ static int upgrade_fw(struct adapter *adap)
 	struct device *dev = &adap->pdev->dev;
 
 	ret = request_firmware(&fw, FW_FNAME, dev);
-	if (ret < 0) {
-		dev_err(dev, "could not upgrade firmware: unable to load %s\n",
-			FW_FNAME);
+	if (ret)
 		return ret;
-	}
 	ret = t3_load_fw(adap, fw->data, fw->size);
 	release_firmware(fw);
 
@@ -1128,11 +1120,8 @@ static int update_tpsram(struct adapter *adap)
 	snprintf(buf, sizeof(buf), TPSRAM_NAME, rev);
 
 	ret = request_firmware(&tpsram, buf, dev);
-	if (ret < 0) {
-		dev_err(dev, "could not load TP SRAM: unable to load %s\n",
-			buf);
+	if (ret)
 		return ret;
-	}
 
 	ret = t3_check_tpsram(adap, tpsram->data, tpsram->size);
 	if (ret)
@@ -1629,7 +1618,6 @@ static void get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info)
 	spin_unlock(&adapter->stats_lock);
 
 	strlcpy(info->driver, DRV_NAME, sizeof(info->driver));
-	strlcpy(info->version, DRV_VERSION, sizeof(info->version));
 	strlcpy(info->bus_info, pci_name(adapter->pdev),
 		sizeof(info->bus_info));
 	if (fw_vers)
@@ -2106,6 +2094,7 @@ static void get_wol(struct net_device *dev, struct ethtool_wolinfo *wol)
 }
 
 static const struct ethtool_ops cxgb_ethtool_ops = {
+	.supported_coalesce_params = ETHTOOL_COALESCE_RX_USECS,
 	.get_drvinfo = get_drvinfo,
 	.get_msglevel = get_msglevel,
 	.set_msglevel = set_msglevel,
@@ -3209,8 +3198,6 @@ static int init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	const struct adapter_info *ai;
 	struct adapter *adapter = NULL;
 	struct port_info *pi;
-
-	pr_info_once("%s - version %s\n", DRV_DESC, DRV_VERSION);
 
 	if (!cxgb3_wq) {
 		cxgb3_wq = create_singlethread_workqueue(DRV_NAME);

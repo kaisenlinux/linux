@@ -2243,19 +2243,8 @@ int b43_do_request_fw(struct b43_request_fw_context *ctx,
 	}
 	err = request_firmware(&ctx->blob, ctx->fwname,
 			       ctx->dev->dev->dev);
-	if (err == -ENOENT) {
-		snprintf(ctx->errors[ctx->req_type],
-			 sizeof(ctx->errors[ctx->req_type]),
-			 "Firmware file \"%s\" not found\n",
-			 ctx->fwname);
+	if (err)
 		return err;
-	} else if (err) {
-		snprintf(ctx->errors[ctx->req_type],
-			 sizeof(ctx->errors[ctx->req_type]),
-			 "Firmware file \"%s\" request failed (err=%d)\n",
-			 ctx->fwname, err);
-		return err;
-	}
 fw_ready:
 	if (ctx->blob->size < sizeof(struct b43_fw_header))
 		goto err_format;
@@ -5569,7 +5558,7 @@ static struct b43_wl *b43_wireless_init(struct b43_bus_dev *dev)
 	/* fill hw info */
 	ieee80211_hw_set(hw, RX_INCLUDES_FCS);
 	ieee80211_hw_set(hw, SIGNAL_DBM);
-
+	ieee80211_hw_set(hw, MFP_CAPABLE);
 	hw->wiphy->interface_modes =
 		BIT(NL80211_IFTYPE_AP) |
 		BIT(NL80211_IFTYPE_MESH_POINT) |

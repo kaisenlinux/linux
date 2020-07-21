@@ -148,10 +148,10 @@ static int parse_num64(uint64_t *num64, char *token)
 			switch (token[len - 2]) {
 			case 'G':
 				shift += 10;
-				/* fall through */
+				fallthrough;
 			case 'M':
 				shift += 10;
-				/* fall through */
+				fallthrough;
 			case 'k':
 				shift += 10;
 				token[len - 2] = 0;
@@ -297,7 +297,11 @@ static int phram_param_call(const char *val, const struct kernel_param *kp)
 #endif
 }
 
-module_param_call(phram, phram_param_call, NULL, NULL, 0200);
+static const struct kernel_param_ops phram_param_ops = {
+	.set = phram_param_call
+};
+__module_param_call(MODULE_PARAM_PREFIX, phram, &phram_param_ops, NULL,
+		    0200, -1, KERNEL_PARAM_FL_HWPARAM | hwparam_iomem);
 MODULE_PARM_DESC(phram, "Memory region to map. \"phram=<name>,<start>,<length>\"");
 
 
