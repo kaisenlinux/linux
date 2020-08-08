@@ -1,5 +1,5 @@
 [abi]
-abiname: kaisen1
+abiname: kaisen2
 ignore-changes:
  __cpuhp_*
  bpf_analyzer

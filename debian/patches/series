@@ -36,7 +36,6 @@ features/all/wireless-carl9170-Enable-sniffer-mode-promisc-flag-t.patch
 
 # Patches from aufs5 repository, imported with debian/bin/genpatch-aufs.
 # These are only the changes needed to allow aufs to be built out-of-tree.
-bugfix/all/revert-general-protection-fault-ath9k_hif_usb_rx_cb
 features/all/aufs5/aufs5-base.patch
 features/all/aufs5/aufs5-mmap.patch
 features/all/aufs5/aufs5-standalone.patch
@@ -72,6 +71,7 @@ bugfix/arm/arm-dts-kirkwood-fix-sata-pinmux-ing-for-ts419.patch
 bugfix/arm64/dts-rockchip-correct-voltage-selector-firefly-RK3399.patch
 bugfix/x86/perf-tools-fix-unwind-build-on-i386.patch
 bugfix/sh/sh-boot-do-not-use-hyphen-in-exported-variable-name.patch
+bugfix/sh/sh-implement-__get_user_u64.patch
 bugfix/arm/arm-mm-export-__sync_icache_dcache-for-xen-privcmd.patch
 bugfix/powerpc/powerpc-boot-fix-missing-crc32poly.h-when-building-with-kernel_xz.patch
 bugfix/arm64/arm64-acpi-Add-fixup-for-HPE-m400-quirks.patch
@@ -87,7 +87,8 @@ bugfix/all/fs-add-module_softdep-declarations-for-hard-coded-cr.patch
 bugfix/all/partially-revert-usb-kconfig-using-select-for-usb_co.patch
 debian/revert-objtool-fix-config_stack_validation-y-warning.patch
 bugfix/all/partially-revert-net-socket-implement-64-bit-timestamps.patch
-bugfix/all/nfsd-apply-umask-on-fs-without-ACL-support.patch
+bugfix/all/perf-cs-etm-Move-definition-of-traceid_list-global-v.patch
+bugfix/all/usbip-tools-fix-build-error-for-multiple-definition.patch
 
 # Miscellaneous features
 
@@ -126,6 +127,7 @@ bugfix/all/libcpupower-hide-private-function.patch
 bugfix/all/cpupower-fix-checks-for-cpu-existence.patch
 bugfix/all/tools-perf-pmu-events-fix-reproducibility.patch
 bugfix/all/0005-libtraceevent-Add-dependency-on-libdl.patch
+bugfix/all/libtraceevent-fix-build-with-binutils-2.35.patch
 
 # overlay: allow mounting in user namespaces
 debian/overlayfs-permit-mounts-in-userns.patch
