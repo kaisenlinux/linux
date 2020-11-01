@@ -1,7 +1,7 @@
 146236262d655af80ee1e3f5dddc7389  debian/bin/gencontrol.py
-fed542934e98bb69a2f0fdb4c6473641  debian/build/version-info
+8d5def9a72f7eee0b46747376597738f  debian/build/version-info
 fe4456d48e3218fb8980c8577d03a7ae  debian/templates/control.config.in
-6fea4e452a7a77e7063bb17051fff3a7  debian/templates/control.docs.in
+9509e39d8e60906ebd5ee4a8b0355d25  debian/templates/control.docs.in
 358db3af53a223fe60ae89c7a481609f  debian/templates/control.docs.meta.in
 7d4e853b855f515068df3355e2bf5865  debian/templates/control.extra.in
 578bb70eb1ed930f2cf8a774666b747f  debian/templates/control.headers.featureset.in
@@ -10,7 +10,7 @@ ce8590d760adf6efb95181ec626c4aca  debian/templates/control.headers.meta.in
 eda4623fb10d5ba1cefa8502ebaeb0fd  debian/templates/control.image-dbg.in
 817873a7b9fa61d433b2c39f6b2491de  debian/templates/control.image-dbg.meta.in
 459d2768144a8542116bea0805b24dae  debian/templates/control.image.in
-05e51fbfddf01a1ccbabbb7422953173  debian/templates/control.image.meta.in
+91ddd8e344e4b84b61d02c064e47f7d5  debian/templates/control.image.meta.in
 d048c1b6a4d834060d0ce8b502aee906  debian/templates/control.image-unsigned.in
 36387f47e6bacd1e6995a9d41b292e88  debian/templates/control.libc-dev.in
 74b180a87aa1f6377d9bf8a10368c657  debian/templates/control.main.in
@@ -38,9 +38,9 @@ afb508873a44a1f196c2a525fec4b415  debian/templates/image.prerm.in
 381bc892fd36ef7ea5327f649b99cb98  debian/templates/sourcebin.meta.maintscript.in
 0c0569fd41e9c0069db7a300362ef26f  debian/templates/tests-control.image.in
 33d71bfd398d2f9b3bc5c0193b67d17e  debian/templates/tests-control.main.in
-7093a0a96103d688ffab0196f6d492da  debian/config/defines
+d32c46309afa9e7dc140c9143d9152ac  debian/config/defines
 59a811890d2e7129bec940075850f11f  debian/config/alpha/defines
-461a78c6fb25031c509d71c0b928aeff  debian/config/amd64/defines
+95f36048987fb430cb37ed2b8c4c8f98  debian/config/amd64/defines
 77edae98c5cec818b17d328b832445ec  debian/config/arm64/defines
 3e673c1434c6132c73c0cfb4bfe38763  debian/config/arm64ilp32/defines
 b8e36ea8c670a12f8e48edc07284691e  debian/config/armel/defines
@@ -83,4 +83,4 @@ b4a45606f37c0d82a63779aa862528d9  debian/config/armhf/none/defines
 7146ff53fc4f9fbb49948225d8589b69  debian/config/i386/rt/defines
 1f2f888a9e94dfb519bb1eab12408d34  debian/config/riscv64/none/defines
 e657478131ce8e645c2d7151586ef24e  debian/installer/kernel-versions
-62e90009e381502ef8b64668b97e4ada  debian/installer/package-list
+62b67e678eb87227e69d489aefa7ed79  debian/installer/package-list
