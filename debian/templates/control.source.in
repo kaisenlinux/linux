@@ -1,7 +1,7 @@
 Section: kernel
 Priority: optional
 Maintainer: Kevin Chevreuil - Kaisen <kaisen@kaisen-linux.org>
-Standards-Version: 4.5.0
+Standards-Version: 4.5.1
 Build-Depends:
  debhelper-compat (= 12), dh-exec,
 # used to run debian/bin/*.py
@@ -33,7 +33,9 @@ Build-Depends-Arch:
  libelf-dev <!stage1 !pkg.linux.notools>,
 # used by upstream headers_install target and by debian/rules.d/tools/usb/usbip
  rsync,
- lz4 [amd64 arm64] <!stage1 !pkg.linux.nokernel>
+ lz4 [amd64 arm64] <!stage1 !pkg.linux.nokernel>,
+# used for bft debug info
+ dwarves (>= 1.16~) [amd64 arm64] <!stage1 !pkg.linux.nokernel>,
 Rules-Requires-Root: no
 Vcs-Git: https://gitlab.com/kaisenlinux/packages/linux.git
 Vcs-Browser: https://gitlab.com/kaisenlinux/packages/linux
