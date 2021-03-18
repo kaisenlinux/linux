@@ -6,7 +6,7 @@ kernel-arch: x86
 
 [build]
 image-file: arch/x86/boot/bzImage
-# We don't want signed modules in Kali
+# Kernel modules don't need be signed in Kaisen Linux
 signed-code: false
 vdso: true
 

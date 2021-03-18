@@ -662,7 +662,7 @@ ieee80211_tx_h_select_key(struct ieee80211_tx_data *tx)
 		if (!skip_hw && tx->key &&
 		    tx->key->flags & KEY_FLAG_UPLOADED_TO_HARDWARE)
 			info->control.hw_key = &tx->key->conf;
-	} else if (!ieee80211_is_mgmt(hdr->frame_control) && tx->sta &&
+	} else if (ieee80211_is_data_present(hdr->frame_control) && tx->sta &&
 		   test_sta_flag(tx->sta, WLAN_STA_USES_ENCRYPTION)) {
 		return TX_DROP;
 	}
@@ -814,19 +814,11 @@ ieee80211_tx_h_sequence(struct ieee80211_tx_data *tx)
 
 	/*
 	 * Packet injection may want to control the sequence
-	 * number, so if an injected packet is found, skip
-	 * renumbering it. Also make the packet NO_ACK to avoid
-	 * excessive retries (ACKing and retrying should be
-	 * handled by the injecting application).
-	 * FIXME This may break hostapd and some other injectors.
-	 * This should be done using a radiotap flag.
+	 * number, if we have no matching interface then we
+	 * neither assign one ourselves nor ask the driver to.
 	 */
-	if (unlikely((info->flags & IEEE80211_TX_CTL_INJECTED) &&
-	   !(tx->sdata->u.mntr.flags & MONITOR_FLAG_COOK_FRAMES))) {
-		if (!ieee80211_has_morefrags(hdr->frame_control))
-			info->flags |= IEEE80211_TX_CTL_NO_ACK;
+	if (unlikely(info->control.vif->type == NL80211_IFTYPE_MONITOR))
 		return TX_CONTINUE;
-	}
 
 	if (unlikely(ieee80211_is_ctl(hdr->frame_control)))
 		return TX_CONTINUE;
@@ -2035,10 +2027,6 @@ void ieee80211_xmit(struct ieee80211_sub_if_data *sdata,
 	}
 
 	ieee80211_set_qos_hdr(sdata, skb);
-	// Don't overwrite QoS header in monitor mode
-	if (likely(info->control.vif->type != NL80211_IFTYPE_MONITOR)) {
-	    ieee80211_set_qos_hdr(sdata, skb);
-	}
 	ieee80211_tx(sdata, sta, skb, false);
 }
 
@@ -3848,7 +3836,7 @@ void __ieee80211_schedule_txq(struct ieee80211_hw *hw,
 		 * get immediately moved to the back of the list on the next
 		 * call to ieee80211_next_txq().
 		 */
-		if (txqi->txq.sta &&
+		if (txqi->txq.sta && local->airtime_flags &&
 		    wiphy_ext_feature_isset(local->hw.wiphy,
 					    NL80211_EXT_FEATURE_AIRTIME_FAIRNESS))
 			list_add(&txqi->schedule_order,
@@ -4290,7 +4278,6 @@ netdev_tx_t ieee80211_subif_start_xmit_8023(struct sk_buff *skb,
 	struct ethhdr *ehdr = (struct ethhdr *)skb->data;
 	struct ieee80211_key *key;
 	struct sta_info *sta;
-	bool offload = true;
 
 	if (unlikely(skb->len < ETH_HLEN)) {
 		kfree_skb(skb);
@@ -4306,18 +4293,22 @@ netdev_tx_t ieee80211_subif_start_xmit_8023(struct sk_buff *skb,
 
 	if (unlikely(IS_ERR_OR_NULL(sta) || !sta->uploaded ||
 	    !test_sta_flag(sta, WLAN_STA_AUTHORIZED) ||
-		sdata->control_port_protocol == ehdr->h_proto))
-		offload = false;
-	else if ((key = rcu_dereference(sta->ptk[sta->ptk_idx])) &&
-		 (!(key->flags & KEY_FLAG_UPLOADED_TO_HARDWARE) ||
-		  key->conf.cipher == WLAN_CIPHER_SUITE_TKIP))
-		offload = false;
+	    sdata->control_port_protocol == ehdr->h_proto))
+		goto skip_offload;
 
-	if (offload)
-		ieee80211_8023_xmit(sdata, dev, sta, key, skb);
-	else
-		ieee80211_subif_start_xmit(skb, dev);
+	key = rcu_dereference(sta->ptk[sta->ptk_idx]);
+	if (!key)
+		key = rcu_dereference(sdata->default_unicast_key);
 
+	if (key && (!(key->flags & KEY_FLAG_UPLOADED_TO_HARDWARE) ||
+		    key->conf.cipher == WLAN_CIPHER_SUITE_TKIP))
+		goto skip_offload;
+
+	ieee80211_8023_xmit(sdata, dev, sta, key, skb);
+	goto out;
+
+skip_offload:
+	ieee80211_subif_start_xmit(skb, dev);
 out:
 	rcu_read_unlock();
 

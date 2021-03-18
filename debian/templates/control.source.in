@@ -1,6 +1,7 @@
 Section: kernel
 Priority: optional
-Maintainer: Kevin Chevreuil - Kaisen <kaisen@kaisen-linux.org>
+XSBC-Original-Maintainer: Debian Kernel Team <debian-kernel@lists.debian.org>
+Maintainer: Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>
 Standards-Version: 4.5.1
 Build-Depends:
  debhelper-compat (= 12), dh-exec,

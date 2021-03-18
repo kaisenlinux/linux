@@ -46,6 +46,7 @@ CONFIG_CRYPTO_AES_ARM64_CE=m
 CONFIG_CRYPTO_AES_ARM64_CE_CCM=m
 CONFIG_CRYPTO_AES_ARM64_CE_BLK=m
 # CONFIG_CRYPTO_AES_ARM64_NEON_BLK is not set
+CONFIG_CRYPTO_NHPOLY1305_NEON=m
 CONFIG_CRYPTO_AES_ARM64_BS=m
 
 ##
@@ -358,6 +359,12 @@ CONFIG_DRM_I2C_ADV7511_AUDIO=y
 CONFIG_DRM_ANALOGIX_ANX6345=m
 
 ##
+## file: drivers/gpu/drm/bridge/synopsys/Kconfig
+##
+CONFIG_DRM_DW_HDMI=m
+CONFIG_DRM_DW_HDMI_CEC=m
+
+##
 ## file: drivers/gpu/drm/hisilicon/hibmc/Kconfig
 ##
 CONFIG_DRM_HISI_HIBMC=m
@@ -423,6 +430,12 @@ CONFIG_DRM_SUN8I_MIXER=m
 ##
 CONFIG_DRM_TEGRA=m
 CONFIG_DRM_TEGRA_STAGING=y
+
+##
+## file: drivers/gpu/drm/vc4/Kconfig
+##
+CONFIG_DRM_VC4=m
+CONFIG_DRM_VC4_HDMI_CEC=y
 
 ##
 ## file: drivers/gpu/host1x/Kconfig
