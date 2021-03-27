@@ -109,8 +109,11 @@ static int vnt_download_firmware(struct vnt_private *priv)
 	dev_dbg(dev, "---->Download firmware\n");
 
 	ret = request_firmware(&fw, FIRMWARE_NAME, dev);
-	if (ret)
+	if (ret) {
+		dev_err(dev, "firmware file %s request failed (%d)\n",
+			FIRMWARE_NAME, ret);
 		goto end;
+	}
 
 	for (ii = 0; ii < fw->size; ii += FIRMWARE_CHUNK_SIZE) {
 		length = min_t(int, fw->size - ii, FIRMWARE_CHUNK_SIZE);

@@ -36,8 +36,6 @@
 #include <linux/vga_switcheroo.h>
 #include <drm/drm_probe_helper.h>
 #include <linux/mmu_notifier.h>
-#include <linux/namei.h>
-#include <linux/path.h>
 
 #include "amdgpu.h"
 #include "amdgpu_irq.h"
@@ -770,6 +768,10 @@ uint amdgpu_dm_abm_level = 0;
 MODULE_PARM_DESC(abmlevel, "ABM level (0 = off (default), 1-4 = backlight reduction level) ");
 module_param_named(abmlevel, amdgpu_dm_abm_level, uint, 0444);
 
+int amdgpu_backlight = -1;
+MODULE_PARM_DESC(backlight, "Backlight control (0 = pwm, 1 = aux, -1 auto (default))");
+module_param_named(backlight, amdgpu_backlight, bint, 0444);
+
 /**
  * DOC: tmz (int)
  * Trusted Memory Zone (TMZ) is a method to protect data being written
@@ -1100,28 +1102,6 @@ MODULE_DEVICE_TABLE(pci, pciidlist);
 
 static struct drm_driver kms_driver;
 
-/* Test that /lib/firmware/amdgpu is a directory (or symlink to a
- * directory).  We could try to match the udev search path, but let's
- * keep it simple.
- */
-static bool amdgpu_firmware_installed(void)
-{
-#if IS_BUILTIN(CONFIG_DRM_AMDGPU)
-	/* It may be too early to tell.  Assume it's there. */
-	return true;
-#else
-	struct path path;
-
-	if (kern_path("/lib/firmware/amdgpu", LOOKUP_DIRECTORY | LOOKUP_FOLLOW,
-		      &path) == 0) {
-		path_put(&path);
-		return true;
-	}
-
-	return false;
-#endif
-}
-
 static int amdgpu_pci_probe(struct pci_dev *pdev,
 			    const struct pci_device_id *ent)
 {
@@ -1185,12 +1165,6 @@ static int amdgpu_pci_probe(struct pci_dev *pdev,
 		}
 	}
 #endif
-
-	if (!amdgpu_firmware_installed()) {
-		DRM_ERROR("amdgpu requires firmware installed\n");
-		pr_err_once("See https://wiki.debian.org/Firmware for information about missing firmware\n");
-		return -ENODEV;
-	}
 
 	/* Get rid of things like offb */
 	ret = drm_fb_helper_remove_conflicting_pci_framebuffers(pdev, "amdgpudrmfb");

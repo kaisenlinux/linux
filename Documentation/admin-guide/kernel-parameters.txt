@@ -1854,8 +1854,6 @@
 			bypassed by not enabling DMAR with this option. In
 			this case, gfx device will use physical address for
 			DMA.
-		intgpu_off [Default Off]
-			Bypass the DMAR unit for an integrated GPU only.
 		forcedac [X86-64]
 			With this option iommu will not optimize to look
 			for io virtual address below 32-bit forcing dual
@@ -5236,10 +5234,6 @@
 			are reported in the kernel log. Sysctls registered
 			later by a loaded module cannot be set this way.
 			Example: sysctl.vm.swappiness=40
-
-	syscall.x32=	[KNL,x86_64] Enable/disable use of x32 syscalls on
-			an x86_64 kernel where CONFIG_X86_X32 is enabled.
-			Default depends on CONFIG_X86_X32_DISABLED.
 
 	sysfs.deprecated=0|1 [KNL]
 			Enable/disable old style sysfs layout for old udev
