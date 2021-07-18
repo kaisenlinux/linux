@@ -1,9 +1,9 @@
 Source: linux-signed-@arch@
 Section: kernel
 Priority: optional
-Maintainer: Debian Kernel Team <debian-kernel@lists.debian.org>
-Uploaders: Bastian Blank <waldi@debian.org>, maximilian attems <maks@debian.org>, Ben Hutchings <benh@debian.org>, Salvatore Bonaccorso <carnil@debian.org>
-Standards-Version: 4.2.0
+XSBC-Original-Maintainer: Debian Kernel Team <debian-kernel@lists.debian.org>
+Maintainer: Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>
+Standards-Version: 4.5.1
 Build-Depends:
  debhelper-compat (= 12),
  rsync,
@@ -11,6 +11,6 @@ Build-Depends:
  kernel-wedge (>= 2.102~),
  linux-kbuild-@version@
 Rules-Requires-Root: no
-Vcs-Git: https://salsa.debian.org/kernel-team/linux.git
-Vcs-Browser: https://salsa.debian.org/kernel-team/linux
+Vcs-Git: https://gitlab.com/kaisenlinux/packages/linux.git
+Vcs-Browser: https://gitlab.com/kaisenlinux/packages/linux
 Homepage: https://www.kernel.org/
