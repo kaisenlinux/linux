@@ -38,6 +38,7 @@
 #include "intel_fifo_underrun.h"
 #include "intel_panel.h"
 #include "intel_sideband.h"
+#include "skl_scaler.h"
 
 /* return pixels in terms of txbyteclkhs */
 static u16 txbyteclkhs(u16 pixels, int bpp, int lane_count,
@@ -992,7 +993,14 @@ static void intel_dsi_post_disable(struct intel_atomic_state *state,
 	 * FIXME As we do with eDP, just make a note of the time here
 	 * and perform the wait before the next panel power on.
 	 */
-	intel_dsi_msleep(intel_dsi, intel_dsi->panel_pwr_cycle_delay);
+	msleep(intel_dsi->panel_pwr_cycle_delay);
+}
+
+static void intel_dsi_shutdown(struct intel_encoder *encoder)
+{
+	struct intel_dsi *intel_dsi = enc_to_intel_dsi(encoder);
+
+	msleep(intel_dsi->panel_pwr_cycle_delay);
 }
 
 static bool intel_dsi_get_hw_state(struct intel_encoder *encoder,
@@ -1853,6 +1861,7 @@ void vlv_dsi_init(struct drm_i915_private *dev_priv)
 	intel_encoder->get_hw_state = intel_dsi_get_hw_state;
 	intel_encoder->get_config = intel_dsi_get_config;
 	intel_encoder->update_pipe = intel_panel_update_backlight;
+	intel_encoder->shutdown = intel_dsi_shutdown;
 
 	intel_connector->get_hw_state = intel_connector_get_hw_state;
 

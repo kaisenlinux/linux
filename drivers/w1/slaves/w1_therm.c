@@ -63,8 +63,8 @@ static u16 bulk_read_device_counter; /* =0 as per C standard */
 #define EEPROM_CMD_READ     "restore"	/* cmd for read eeprom sysfs */
 #define BULK_TRIGGER_CMD    "trigger"	/* cmd to trigger a bulk read */
 
-#define MIN_TEMP	-55	/* min temperature that can be mesured */
-#define MAX_TEMP	125	/* max temperature that can be mesured */
+#define MIN_TEMP	-55	/* min temperature that can be measured */
+#define MAX_TEMP	125	/* max temperature that can be measured */
 
 /* Allowed values for sysfs conv_time attribute */
 #define CONV_TIME_DEFAULT 0
@@ -315,7 +315,7 @@ static ssize_t resolution_show(struct device *device,
 static ssize_t resolution_store(struct device *device,
 	struct device_attribute *attr, const char *buf, size_t size);
 
-static ssize_t eeprom_store(struct device *device,
+static ssize_t eeprom_cmd_store(struct device *device,
 	struct device_attribute *attr, const char *buf, size_t size);
 
 static ssize_t alarms_store(struct device *device,
@@ -350,7 +350,7 @@ static DEVICE_ATTR_RO(w1_seq);
 static DEVICE_ATTR_RO(temperature);
 static DEVICE_ATTR_RO(ext_power);
 static DEVICE_ATTR_RW(resolution);
-static DEVICE_ATTR_WO(eeprom);
+static DEVICE_ATTR_WO(eeprom_cmd);
 static DEVICE_ATTR_RW(alarms);
 static DEVICE_ATTR_RW(conv_time);
 static DEVICE_ATTR_RW(features);
@@ -386,7 +386,7 @@ static struct attribute *w1_therm_attrs[] = {
 	&dev_attr_temperature.attr,
 	&dev_attr_ext_power.attr,
 	&dev_attr_resolution.attr,
-	&dev_attr_eeprom.attr,
+	&dev_attr_eeprom_cmd.attr,
 	&dev_attr_alarms.attr,
 	&dev_attr_conv_time.attr,
 	&dev_attr_features.attr,
@@ -397,7 +397,7 @@ static struct attribute *w1_ds18s20_attrs[] = {
 	&dev_attr_w1_slave.attr,
 	&dev_attr_temperature.attr,
 	&dev_attr_ext_power.attr,
-	&dev_attr_eeprom.attr,
+	&dev_attr_eeprom_cmd.attr,
 	&dev_attr_alarms.attr,
 	&dev_attr_conv_time.attr,
 	&dev_attr_features.attr,
@@ -410,7 +410,7 @@ static struct attribute *w1_ds28ea00_attrs[] = {
 	&dev_attr_temperature.attr,
 	&dev_attr_ext_power.attr,
 	&dev_attr_resolution.attr,
-	&dev_attr_eeprom.attr,
+	&dev_attr_eeprom_cmd.attr,
 	&dev_attr_alarms.attr,
 	&dev_attr_conv_time.attr,
 	&dev_attr_features.attr,
@@ -906,8 +906,7 @@ static inline int temperature_from_RAM(struct w1_slave *sl, u8 rom[9])
 static inline s8 int_to_short(int i)
 {
 	/* Prepare to cast to short by eliminating out of range values */
-	i = i > MAX_TEMP ? MAX_TEMP : i;
-	i = i < MIN_TEMP ? MIN_TEMP : i;
+	i = clamp(i, MIN_TEMP, MAX_TEMP);
 	return (s8) i;
 }
 
@@ -1736,7 +1735,7 @@ static ssize_t resolution_store(struct device *device,
 	return size;
 }
 
-static ssize_t eeprom_store(struct device *device,
+static ssize_t eeprom_cmd_store(struct device *device,
 	struct device_attribute *attr, const char *buf, size_t size)
 {
 	struct w1_slave *sl = dev_to_w1_slave(device);

@@ -69,6 +69,7 @@ void nvmet_subsys_disc_changed(struct nvmet_subsys *subsys,
 	struct nvmet_port *port;
 	struct nvmet_subsys_link *s;
 
+	lockdep_assert_held(&nvmet_config_sem);
 	nvmet_genctr++;
 
 	list_for_each_entry(port, nvmet_ports, global_entry)
@@ -378,7 +379,7 @@ u16 nvmet_parse_discovery_cmd(struct nvmet_req *req)
 		req->execute = nvmet_execute_disc_identify;
 		return 0;
 	default:
-		pr_err("unhandled cmd %d\n", cmd->common.opcode);
+		pr_debug("unhandled cmd %d\n", cmd->common.opcode);
 		req->error_loc = offsetof(struct nvme_common_command, opcode);
 		return NVME_SC_INVALID_OPCODE | NVME_SC_DNR;
 	}

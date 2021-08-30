@@ -308,10 +308,41 @@ static const struct pci_p2pdma_whitelist_entry {
 	{}
 };
 
+/*
+ * This lookup function tries to find the PCI device corresponding to a given
+ * host bridge.
+ *
+ * It assumes the host bridge device is the first PCI device in the
+ * bus->devices list and that the devfn is 00.0. These assumptions should hold
+ * for all the devices in the whitelist above.
+ *
+ * This function is equivalent to pci_get_slot(host->bus, 0), however it does
+ * not take the pci_bus_sem lock seeing __host_bridge_whitelist() must not
+ * sleep.
+ *
+ * For this to be safe, the caller should hold a reference to a device on the
+ * bridge, which should ensure the host_bridge device will not be freed
+ * or removed from the head of the devices list.
+ */
+static struct pci_dev *pci_host_bridge_dev(struct pci_host_bridge *host)
+{
+	struct pci_dev *root;
+
+	root = list_first_entry_or_null(&host->bus->devices,
+					struct pci_dev, bus_list);
+
+	if (!root)
+		return NULL;
+	if (root->devfn != PCI_DEVFN(0, 0))
+		return NULL;
+
+	return root;
+}
+
 static bool __host_bridge_whitelist(struct pci_host_bridge *host,
 				    bool same_host_bridge)
 {
-	struct pci_dev *root = pci_get_slot(host->bus, PCI_DEVFN(0, 0));
+	struct pci_dev *root = pci_host_bridge_dev(host);
 	const struct pci_p2pdma_whitelist_entry *entry;
 	unsigned short vendor, device;
 
@@ -320,7 +351,6 @@ static bool __host_bridge_whitelist(struct pci_host_bridge *host,
 
 	vendor = root->vendor;
 	device = root->device;
-	pci_dev_put(root);
 
 	for (entry = pci_p2pdma_whitelist; entry->vendor; entry++) {
 		if (vendor != entry->vendor || device != entry->device)
@@ -556,15 +586,6 @@ int pci_p2pdma_distance_many(struct pci_dev *provider, struct device **clients,
 		return -1;
 
 	for (i = 0; i < num_clients; i++) {
-#ifdef CONFIG_DMA_VIRT_OPS
-		if (clients[i]->dma_ops == &dma_virt_ops) {
-			if (verbose)
-				dev_warn(clients[i],
-					 "cannot be used for peer-to-peer DMA because the driver makes use of dma_virt_ops\n");
-			return -1;
-		}
-#endif
-
 		pci_client = find_parent_pci_dev(clients[i]);
 		if (!pci_client) {
 			if (verbose)
@@ -609,7 +630,7 @@ bool pci_has_p2pmem(struct pci_dev *pdev)
 EXPORT_SYMBOL_GPL(pci_has_p2pmem);
 
 /**
- * pci_p2pmem_find - find a peer-to-peer DMA memory device compatible with
+ * pci_p2pmem_find_many - find a peer-to-peer DMA memory device compatible with
  *	the specified list of clients and shortest distance (as determined
  *	by pci_p2pmem_dma())
  * @clients: array of devices to check (NULL-terminated)
@@ -674,7 +695,7 @@ struct pci_dev *pci_p2pmem_find_many(struct device **clients, int num_clients)
 EXPORT_SYMBOL_GPL(pci_p2pmem_find_many);
 
 /**
- * pci_alloc_p2p_mem - allocate peer-to-peer DMA memory
+ * pci_alloc_p2pmem - allocate peer-to-peer DMA memory
  * @pdev: the device to allocate memory from
  * @size: number of bytes to allocate
  *
@@ -727,7 +748,7 @@ void pci_free_p2pmem(struct pci_dev *pdev, void *addr, size_t size)
 EXPORT_SYMBOL_GPL(pci_free_p2pmem);
 
 /**
- * pci_virt_to_bus - return the PCI bus address for a given virtual
+ * pci_p2pmem_virt_to_bus - return the PCI bus address for a given virtual
  *	address obtained with pci_alloc_p2pmem()
  * @pdev: the device the memory was allocated from
  * @addr: address of the memory that was allocated
@@ -834,24 +855,10 @@ static int __pci_p2pdma_map_sg(struct pci_p2pdma_pagemap *p2p_pgmap,
 		struct device *dev, struct scatterlist *sg, int nents)
 {
 	struct scatterlist *s;
-	phys_addr_t paddr;
 	int i;
 
-	/*
-	 * p2pdma mappings are not compatible with devices that use
-	 * dma_virt_ops. If the upper layers do the right thing
-	 * this should never happen because it will be prevented
-	 * by the check in pci_p2pdma_distance_many()
-	 */
-#ifdef CONFIG_DMA_VIRT_OPS
-	if (WARN_ON_ONCE(dev->dma_ops == &dma_virt_ops))
-		return 0;
-#endif
-
 	for_each_sg(sg, s, nents, i) {
-		paddr = sg_phys(s);
-
-		s->dma_address = paddr - p2p_pgmap->bus_offset;
+		s->dma_address = sg_phys(s) - p2p_pgmap->bus_offset;
 		sg_dma_len(s) = s->length;
 	}
 
@@ -859,7 +866,7 @@ static int __pci_p2pdma_map_sg(struct pci_p2pdma_pagemap *p2p_pgmap,
 }
 
 /**
- * pci_p2pdma_map_sg - map a PCI peer-to-peer scatterlist for DMA
+ * pci_p2pdma_map_sg_attrs - map a PCI peer-to-peer scatterlist for DMA
  * @dev: device doing the DMA request
  * @sg: scatter list to map
  * @nents: elements in the scatterlist
@@ -896,7 +903,7 @@ int pci_p2pdma_map_sg_attrs(struct device *dev, struct scatterlist *sg,
 EXPORT_SYMBOL_GPL(pci_p2pdma_map_sg_attrs);
 
 /**
- * pci_p2pdma_unmap_sg - unmap a PCI peer-to-peer scatterlist that was
+ * pci_p2pdma_unmap_sg_attrs - unmap a PCI peer-to-peer scatterlist that was
  *	mapped with pci_p2pdma_map_sg()
  * @dev: device doing the DMA request
  * @sg: scatter list to map

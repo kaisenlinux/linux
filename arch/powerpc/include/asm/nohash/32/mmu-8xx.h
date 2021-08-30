@@ -172,6 +172,9 @@
 
 #define mmu_linear_psize	MMU_PAGE_8M
 
+#define MODULES_VADDR	(PAGE_OFFSET - SZ_256M)
+#define MODULES_END	PAGE_OFFSET
+
 #ifndef __ASSEMBLY__
 
 #include <linux/mmdebug.h>
@@ -181,7 +184,7 @@ void mmu_pin_tlb(unsigned long top, bool readonly);
 typedef struct {
 	unsigned int id;
 	unsigned int active;
-	unsigned long vdso_base;
+	void __user *vdso;
 	void *pte_frag;
 } mm_context_t;
 

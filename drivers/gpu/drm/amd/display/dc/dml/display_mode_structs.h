@@ -126,9 +126,7 @@ struct _vcs_dpi_soc_bounding_box_st {
 
 struct _vcs_dpi_ip_params_st {
 	bool use_min_dcfclk;
-#ifdef CONFIG_DRM_AMD_DC_DCN3_0
 	bool clamp_min_dcfclk;
-#endif
 	bool gpuvm_enable;
 	bool hostvm_enable;
 	bool dsc422_native_support;
@@ -166,7 +164,7 @@ struct _vcs_dpi_ip_params_st {
 	double writeback_max_vscl_ratio;
 	double writeback_min_hscl_ratio;
 	double writeback_min_vscl_ratio;
-	double maximum_dsc_bits_per_component;
+	unsigned int maximum_dsc_bits_per_component;
 	unsigned int writeback_max_hscl_taps;
 	unsigned int writeback_max_vscl_taps;
 	unsigned int writeback_line_buffer_luma_buffer_size;
@@ -255,6 +253,8 @@ struct _vcs_dpi_display_pipe_source_params_st {
 	unsigned int viewport_y_c;
 	unsigned int viewport_width_c;
 	unsigned int viewport_height_c;
+	unsigned int viewport_width_max;
+	unsigned int viewport_height_max;
 	unsigned int data_pitch;
 	unsigned int data_pitch_c;
 	unsigned int meta_pitch;
@@ -294,11 +294,12 @@ struct writeback_st {
 struct _vcs_dpi_display_output_params_st {
 	int dp_lanes;
 	double output_bpp;
+	unsigned int dsc_input_bpc;
 	int dsc_enable;
 	int wb_enable;
 	int num_active_wb;
-	int output_bpc;
 	int output_type;
+	int is_virtual;
 	int output_format;
 	int dsc_slices;
 	int max_audio_sample_rate;
@@ -336,7 +337,6 @@ struct _vcs_dpi_display_pipe_dest_params_st {
 	unsigned int vblank_end;
 	unsigned int htotal;
 	unsigned int vtotal;
-	unsigned int refresh_rate;
 	unsigned int vfront_porch;
 	unsigned int vactive;
 	unsigned int hactive;
@@ -347,7 +347,6 @@ struct _vcs_dpi_display_pipe_dest_params_st {
 	unsigned char interlaced;
 	double pixel_rate_mhz;
 	unsigned char synchronized_vblank_all_planes;
-	unsigned char synchronize_timing_if_single_refresh_rate;
 	unsigned char otg_inst;
 	unsigned int odm_combine;
 	unsigned char use_maximum_vstartup;

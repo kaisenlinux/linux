@@ -1,3 +1,107 @@
+linux (5.13.12-1kaisen) kaisen-packages; urgency=medium
+
+  * Import Linux 5.13.12
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Thu, 26 Aug 2021 22:00:47 +0200
+
+linux (5.13.12-1~exp1) experimental; urgency=medium
+
+  * New upstream stable update:
+    https://www.kernel.org/pub/linux/kernel/v5.x/ChangeLog-5.13.10
+    https://www.kernel.org/pub/linux/kernel/v5.x/ChangeLog-5.13.11
+    https://www.kernel.org/pub/linux/kernel/v5.x/ChangeLog-5.13.12
+
+  [ Salvatore Bonaccorso ]
+  * net: Enable MPTCP (Closes: #987815)
+
+  [ Bastian Blank ]
+  * [mips*] Increase RELOCATION_TABLE_SIZE to 0x1c0000.
+  * Enable SECURITY_LANDLOCK, SECURITY_PATH.
+  * Fix external modules build. (closes: #992219)
+  * Force more compressions modules into main installer package.
+    (closes: #992221)
+  * Drop redundant patch for overlay in user namespace.
+
+  [ Uwe Kleine-König ]
+  * [x86] Enable X86_PLATFORM_DRIVERS_DELL which is needed to keep some Dell
+    specific drivers. (Closes: #992251)
+
+ -- Bastian Blank <waldi@debian.org>  Fri, 20 Aug 2021 22:39:29 +0200
+
+linux (5.13.9-1~exp2) experimental; urgency=medium
+
+  * Fix linux-cpupower installation.
+
+ -- Bastian Blank <waldi@debian.org>  Tue, 10 Aug 2021 21:12:41 +0200
+
+linux (5.13.9-1~exp1) experimental; urgency=medium
+
+  * New upstream release: https://kernelnewbies.org/Linux_5.11
+  * New upstream release: https://kernelnewbies.org/Linux_5.12
+  * New upstream release: https://kernelnewbies.org/Linux_5.13
+
+  [ Bastian Blank ]
+  * Always build-depend on native libelf-dev.
+  * Specify trusted certs file in package config.
+  * Enable PROC_VMCORE.
+  * Enable SECURITYFS.
+  * Re-enable IMA. (closes: #972459)
+  * [x86] Enable AMD_MEM_ENCRYPT. (closes: #983586, #989040)
+  * Enable UNICODE. (closes: #985689)
+  * Enable CGROUP_MISC.
+  * [x86] Enable PINCTRL_ALDERLAKE, PINCTRL_ELKHARTLAKE, PINCTRL_EMMITSBURG,
+    PINCTRL_JASPERLAKE, PINCTRL_LAKEFIELD.
+  * [amd64] Enable MICROSOFT_MANA.
+  * [arm64] Enable GVE. (closes: #991835)
+
+ -- Bastian Blank <waldi@debian.org>  Mon, 09 Aug 2021 18:35:43 +0200
+
+linux (5.10.46-4) unstable; urgency=medium
+
+  * bpf: Introduce BPF nospec instruction for mitigating Spectre v4
+    (CVE-2021-34556, CVE-2021-35477)
+  * bpf: Fix leakage due to insufficient speculative store bypass mitigation
+    (CVE-2021-34556, CVE-2021-35477)
+  * bpf: Remove superfluous aux sanitation on subprog rejection
+  * Ignore ABI changes for bpf_offload_dev_create and bpf_verifier_log_write
+  * bpf: Add kconfig knob for disabling unpriv bpf by default
+  * init: Enable BPF_UNPRIV_DEFAULT_OFF (Closes: #990411)
+  * linux-image: Add NEWS entry documenting that unprivileged calls to bpf() are
+    disabled by default in Debian.
+  * bpf: verifier: Allocate idmap scratch in verifier env
+  * bpf: Fix pointer arithmetic mask tightening under state pruning
+
+ -- Salvatore Bonaccorso <carnil@debian.org>  Tue, 03 Aug 2021 07:50:50 +0200
+
+linux (5.10.46-3) unstable; urgency=medium
+
+  * [armhf] Add mdio-aspeed to nic-modules.
+    Thanks to Joel Stanley <joel@jms.id.au> (Closes: #991262)
+  * Revert "drm/amdgpu/gfx9: fix the doorbell missing when in CGPG issue."
+    (Closes: #990312)
+  * Revert "drm/amdgpu/gfx10: enlarge CP_MEC_DOORBELL_RANGE_UPPER to cover full
+    doorbell." (Closes: #990312)
+  * Input: joydev - prevent use of not validated data in JSIOCSBTNMAP ioctl
+    (CVE-2021-3612)
+  * sctp: validate from_addr_param return (CVE-2021-3655)
+  * sctp: add size validation when walking chunks (CVE-2021-3655)
+  * [s390x] sclp_vt220: fix console name to match device (Closes: #961056)
+  * block: return the correct bvec when checking for gaps
+  * sctp: fix return value check in __sctp_rcv_asconf_lookup
+
+ -- Salvatore Bonaccorso <carnil@debian.org>  Wed, 28 Jul 2021 07:55:40 +0200
+
+linux (5.10.46-2) unstable; urgency=medium
+
+  * swiotlb: manipulate orig_addr when tlb_addr has offset (Closes: #989778)
+  * KVM: do not allow mapping valid but non-reference-counted pages
+    (CVE-2021-22543)
+  * [x86] platform/x86: toshiba_haps: Fix missing newline in pr_debug call in
+    toshiba_haps_notify (Closes: #799193)
+  * seq_file: Disallow extremely large seq buffer allocations (CVE-2021-33909)
+
+ -- Salvatore Bonaccorso <carnil@debian.org>  Tue, 20 Jul 2021 14:06:36 +0200
+
 linux (5.10.46-1kaisen) kaisen-packages; urgency=medium
 
   * Import new upstream release

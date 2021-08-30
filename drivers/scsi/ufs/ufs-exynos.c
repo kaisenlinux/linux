@@ -617,20 +617,7 @@ static int exynos_ufs_pre_pwr_mode(struct ufs_hba *hba,
 		goto out;
 	}
 
-
-	ufs_exynos_cap.tx_lanes = UFS_EXYNOS_LIMIT_NUM_LANES_TX;
-	ufs_exynos_cap.rx_lanes = UFS_EXYNOS_LIMIT_NUM_LANES_RX;
-	ufs_exynos_cap.hs_rx_gear = UFS_EXYNOS_LIMIT_HSGEAR_RX;
-	ufs_exynos_cap.hs_tx_gear = UFS_EXYNOS_LIMIT_HSGEAR_TX;
-	ufs_exynos_cap.pwm_rx_gear = UFS_EXYNOS_LIMIT_PWMGEAR_RX;
-	ufs_exynos_cap.pwm_tx_gear = UFS_EXYNOS_LIMIT_PWMGEAR_TX;
-	ufs_exynos_cap.rx_pwr_pwm = UFS_EXYNOS_LIMIT_RX_PWR_PWM;
-	ufs_exynos_cap.tx_pwr_pwm = UFS_EXYNOS_LIMIT_TX_PWR_PWM;
-	ufs_exynos_cap.rx_pwr_hs = UFS_EXYNOS_LIMIT_RX_PWR_HS;
-	ufs_exynos_cap.tx_pwr_hs = UFS_EXYNOS_LIMIT_TX_PWR_HS;
-	ufs_exynos_cap.hs_rate = UFS_EXYNOS_LIMIT_HS_RATE;
-	ufs_exynos_cap.desired_working_mode =
-				UFS_EXYNOS_LIMIT_DESIRED_MODE;
+	ufshcd_init_pwr_dev_param(&ufs_exynos_cap);
 
 	ret = ufshcd_get_pwr_dev_param(&ufs_exynos_cap,
 				       dev_max_params, dev_req_params);
@@ -665,7 +652,6 @@ out:
 
 #define PWR_MODE_STR_LEN	64
 static int exynos_ufs_post_pwr_mode(struct ufs_hba *hba,
-				struct ufs_pa_layer_attr *pwr_max,
 				struct ufs_pa_layer_attr *pwr_req)
 {
 	struct exynos_ufs *ufs = ufshcd_get_variant(hba);
@@ -1168,7 +1154,7 @@ static int exynos_ufs_pwr_change_notify(struct ufs_hba *hba,
 					      dev_req_params);
 		break;
 	case POST_CHANGE:
-		ret = exynos_ufs_post_pwr_mode(hba, NULL, dev_req_params);
+		ret = exynos_ufs_post_pwr_mode(hba, dev_req_params);
 		break;
 	}
 

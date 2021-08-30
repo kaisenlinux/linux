@@ -160,6 +160,8 @@
 #define ROCKCHIP_SPI_VER2_TYPE1			0x05EC0002
 #define ROCKCHIP_SPI_VER2_TYPE2			0x00110002
 
+#define ROCKCHIP_AUTOSUSPEND_TIMEOUT		2000
+
 struct rockchip_spi {
 	struct device *dev;
 
@@ -479,9 +481,9 @@ static int rockchip_spi_config(struct rockchip_spi *rs,
 		bool use_dma, bool slave_mode)
 {
 	u32 cr0 = CR0_FRF_SPI  << CR0_FRF_OFFSET
-	        | CR0_BHT_8BIT << CR0_BHT_OFFSET
-	        | CR0_SSD_ONE  << CR0_SSD_OFFSET
-	        | CR0_EM_BIG   << CR0_EM_OFFSET;
+		| CR0_BHT_8BIT << CR0_BHT_OFFSET
+		| CR0_SSD_ONE  << CR0_SSD_OFFSET
+		| CR0_EM_BIG   << CR0_EM_OFFSET;
 	u32 cr1;
 	u32 dmacr = 0;
 
@@ -568,7 +570,7 @@ static int rockchip_spi_slave_abort(struct spi_controller *ctlr)
 	struct rockchip_spi *rs = spi_controller_get_devdata(ctlr);
 
 	rs->slave_abort = true;
-	complete(&ctlr->xfer_completion);
+	spi_finalize_current_transfer(ctlr);
 
 	return 0;
 }
@@ -722,6 +724,8 @@ static int rockchip_spi_probe(struct platform_device *pdev)
 		goto err_disable_spiclk;
 	}
 
+	pm_runtime_set_autosuspend_delay(&pdev->dev, ROCKCHIP_AUTOSUSPEND_TIMEOUT);
+	pm_runtime_use_autosuspend(&pdev->dev);
 	pm_runtime_set_active(&pdev->dev);
 	pm_runtime_enable(&pdev->dev);
 

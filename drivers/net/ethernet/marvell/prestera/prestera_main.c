@@ -93,15 +93,10 @@ static int prestera_port_open(struct net_device *dev)
 static int prestera_port_close(struct net_device *dev)
 {
 	struct prestera_port *port = netdev_priv(dev);
-	int err;
 
 	netif_stop_queue(dev);
 
-	err = prestera_hw_port_state_set(port, false);
-	if (err)
-		return err;
-
-	return 0;
+	return prestera_hw_port_state_set(port, false);
 }
 
 static netdev_tx_t prestera_port_xmit(struct sk_buff *skb,
@@ -462,20 +457,17 @@ static int prestera_switch_set_base_mac_addr(struct prestera_switch *sw)
 {
 	struct device_node *base_mac_np;
 	struct device_node *np;
-	const char *base_mac;
+	int ret;
 
 	np = of_find_compatible_node(NULL, NULL, "marvell,prestera");
 	base_mac_np = of_parse_phandle(np, "base-mac-provider", 0);
 
-	base_mac = of_get_mac_address(base_mac_np);
-	of_node_put(base_mac_np);
-	if (!IS_ERR(base_mac))
-		ether_addr_copy(sw->base_mac, base_mac);
-
-	if (!is_valid_ether_addr(sw->base_mac)) {
+	ret = of_get_mac_address(base_mac_np, sw->base_mac);
+	if (ret) {
 		eth_random_addr(sw->base_mac);
 		dev_info(prestera_dev(sw), "using random base mac address\n");
 	}
+	of_node_put(base_mac_np);
 
 	return prestera_hw_switch_mac_set(sw, sw->base_mac);
 }
