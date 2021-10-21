@@ -2,7 +2,7 @@ Section: kernel
 Priority: optional
 XSBC-Original-Maintainer: Debian Kernel Team <debian-kernel@lists.debian.org>
 Maintainer: Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>
-Standards-Version: 4.6.0
+Standards-Version: 4.2.0
 Build-Depends:
  debhelper-compat (= 12), dh-exec,
 # used to run debian/bin/*.py

@@ -3012,7 +3012,7 @@ static void mv88e6xxx_teardown(struct dsa_switch *ds)
 {
 	mv88e6xxx_teardown_devlink_params(ds);
 	dsa_devlink_resources_unregister(ds);
-	mv88e6xxx_teardown_devlink_regions(ds);
+	mv88e6xxx_teardown_devlink_regions_global(ds);
 }
 
 static int mv88e6xxx_setup(struct dsa_switch *ds)
@@ -3147,7 +3147,7 @@ unlock:
 	if (err)
 		goto out_resources;
 
-	err = mv88e6xxx_setup_devlink_regions(ds);
+	err = mv88e6xxx_setup_devlink_regions_global(ds);
 	if (err)
 		goto out_params;
 
@@ -3159,6 +3159,16 @@ out_resources:
 	dsa_devlink_resources_unregister(ds);
 
 	return err;
+}
+
+static int mv88e6xxx_port_setup(struct dsa_switch *ds, int port)
+{
+	return mv88e6xxx_setup_devlink_regions_port(ds, port);
+}
+
+static void mv88e6xxx_port_teardown(struct dsa_switch *ds, int port)
+{
+	mv88e6xxx_teardown_devlink_regions_port(ds, port);
 }
 
 /* prod_id for switch families which do not have a PHY model number */
@@ -5781,23 +5791,6 @@ out:
 	return err;
 }
 
-static int mv88e6xxx_port_set_mrouter(struct dsa_switch *ds, int port,
-				      bool mrouter,
-				      struct netlink_ext_ack *extack)
-{
-	struct mv88e6xxx_chip *chip = ds->priv;
-	int err;
-
-	if (!chip->info->ops->port_set_mcast_flood)
-		return -EOPNOTSUPP;
-
-	mv88e6xxx_reg_lock(chip);
-	err = chip->info->ops->port_set_mcast_flood(chip, port, mrouter);
-	mv88e6xxx_reg_unlock(chip);
-
-	return err;
-}
-
 static bool mv88e6xxx_lag_can_offload(struct dsa_switch *ds,
 				      struct net_device *lag,
 				      struct netdev_lag_upper_info *info)
@@ -6072,6 +6065,8 @@ static const struct dsa_switch_ops mv88e6xxx_switch_ops = {
 	.change_tag_protocol	= mv88e6xxx_change_tag_protocol,
 	.setup			= mv88e6xxx_setup,
 	.teardown		= mv88e6xxx_teardown,
+	.port_setup		= mv88e6xxx_port_setup,
+	.port_teardown		= mv88e6xxx_port_teardown,
 	.phylink_validate	= mv88e6xxx_validate,
 	.phylink_mac_link_state	= mv88e6xxx_serdes_pcs_get_state,
 	.phylink_mac_config	= mv88e6xxx_mac_config,
@@ -6099,7 +6094,6 @@ static const struct dsa_switch_ops mv88e6xxx_switch_ops = {
 	.port_bridge_leave	= mv88e6xxx_port_bridge_leave,
 	.port_pre_bridge_flags	= mv88e6xxx_port_pre_bridge_flags,
 	.port_bridge_flags	= mv88e6xxx_port_bridge_flags,
-	.port_set_mrouter	= mv88e6xxx_port_set_mrouter,
 	.port_stp_state_set	= mv88e6xxx_port_stp_state_set,
 	.port_fast_age		= mv88e6xxx_port_fast_age,
 	.port_vlan_filtering	= mv88e6xxx_port_vlan_filtering,

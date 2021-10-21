@@ -726,7 +726,8 @@ static void acm_port_destruct(struct tty_port *port)
 {
 	struct acm *acm = container_of(port, struct acm, port);
 
-	acm_release_minor(acm);
+	if (acm->minor != ACM_MINOR_INVALID)
+		acm_release_minor(acm);
 	usb_put_intf(acm->control);
 	kfree(acm->country_codes);
 	kfree(acm);
@@ -838,7 +839,7 @@ static int acm_tty_write(struct tty_struct *tty,
 	return count;
 }
 
-static int acm_tty_write_room(struct tty_struct *tty)
+static unsigned int acm_tty_write_room(struct tty_struct *tty)
 {
 	struct acm *acm = tty->driver_data;
 	/*
@@ -848,7 +849,7 @@ static int acm_tty_write_room(struct tty_struct *tty)
 	return acm_wb_is_avail(acm) ? acm->writesize : 0;
 }
 
-static int acm_tty_chars_in_buffer(struct tty_struct *tty)
+static unsigned int acm_tty_chars_in_buffer(struct tty_struct *tty)
 {
 	struct acm *acm = tty->driver_data;
 	/*
@@ -1056,21 +1057,8 @@ static void acm_tty_set_termios(struct tty_struct *tty,
 	newline.bParityType = termios->c_cflag & PARENB ?
 				(termios->c_cflag & PARODD ? 1 : 2) +
 				(termios->c_cflag & CMSPAR ? 2 : 0) : 0;
-	switch (termios->c_cflag & CSIZE) {
-	case CS5:
-		newline.bDataBits = 5;
-		break;
-	case CS6:
-		newline.bDataBits = 6;
-		break;
-	case CS7:
-		newline.bDataBits = 7;
-		break;
-	case CS8:
-	default:
-		newline.bDataBits = 8;
-		break;
-	}
+	newline.bDataBits = tty_get_char_size(termios->c_cflag);
+
 	/* FIXME: Needs to clear unsupported bits in the termios */
 	acm->clocal = ((termios->c_cflag & CLOCAL) != 0);
 
@@ -1336,8 +1324,10 @@ made_compressed_probe:
 	usb_get_intf(acm->control); /* undone in destruct() */
 
 	minor = acm_alloc_minor(acm);
-	if (minor < 0)
+	if (minor < 0) {
+		acm->minor = ACM_MINOR_INVALID;
 		goto err_put_port;
+	}
 
 	acm->minor = minor;
 	acm->dev = usb_dev;

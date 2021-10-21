@@ -438,8 +438,8 @@ static void reset_tbufs(struct slgt_info *info);
 static void tdma_reset(struct slgt_info *info);
 static bool tx_load(struct slgt_info *info, const char *buf, unsigned int count);
 
-static void get_signals(struct slgt_info *info);
-static void set_signals(struct slgt_info *info);
+static void get_gtsignals(struct slgt_info *info);
+static void set_gtsignals(struct slgt_info *info);
 static void set_rate(struct slgt_info *info, u32 data_rate);
 
 static void bh_transmit(struct slgt_info *info);
@@ -720,7 +720,7 @@ static void set_termios(struct tty_struct *tty, struct ktermios *old_termios)
 	if ((old_termios->c_cflag & CBAUD) && !C_BAUD(tty)) {
 		info->signals &= ~(SerialSignal_RTS | SerialSignal_DTR);
 		spin_lock_irqsave(&info->lock,flags);
-		set_signals(info);
+		set_gtsignals(info);
 		spin_unlock_irqrestore(&info->lock,flags);
 	}
 
@@ -730,7 +730,7 @@ static void set_termios(struct tty_struct *tty, struct ktermios *old_termios)
 		if (!C_CRTSCTS(tty) || !tty_throttled(tty))
 			info->signals |= SerialSignal_RTS;
 		spin_lock_irqsave(&info->lock,flags);
-	 	set_signals(info);
+	 	set_gtsignals(info);
 		spin_unlock_irqrestore(&info->lock,flags);
 	}
 
@@ -768,7 +768,7 @@ static int write(struct tty_struct *tty,
 	if (!info->tx_buf || (count > info->max_frame_size))
 		return -EIO;
 
-	if (!count || tty->stopped || tty->hw_stopped)
+	if (!count || tty->flow.stopped || tty->hw_stopped)
 		return 0;
 
 	spin_lock_irqsave(&info->lock, flags);
@@ -868,15 +868,15 @@ exit:
 	DBGINFO(("%s wait_until_sent exit\n", info->device_name));
 }
 
-static int write_room(struct tty_struct *tty)
+static unsigned int write_room(struct tty_struct *tty)
 {
 	struct slgt_info *info = tty->driver_data;
-	int ret;
+	unsigned int ret;
 
 	if (sanity_check(info, tty->name, "write_room"))
 		return 0;
 	ret = (info->tx_active) ? 0 : HDLC_MAX_FRAME_SIZE;
-	DBGINFO(("%s write_room=%d\n", info->device_name, ret));
+	DBGINFO(("%s write_room=%u\n", info->device_name, ret));
 	return ret;
 }
 
@@ -889,7 +889,7 @@ static void flush_chars(struct tty_struct *tty)
 		return;
 	DBGINFO(("%s flush_chars entry tx_count=%d\n", info->device_name, info->tx_count));
 
-	if (info->tx_count <= 0 || tty->stopped ||
+	if (info->tx_count <= 0 || tty->flow.stopped ||
 	    tty->hw_stopped || !info->tx_buf)
 		return;
 
@@ -1181,7 +1181,7 @@ static inline void line_info(struct seq_file *m, struct slgt_info *info)
 
 	/* output current serial signal states */
 	spin_lock_irqsave(&info->lock,flags);
-	get_signals(info);
+	get_gtsignals(info);
 	spin_unlock_irqrestore(&info->lock,flags);
 
 	stat_buf[0] = 0;
@@ -1254,14 +1254,14 @@ static int synclink_gt_proc_show(struct seq_file *m, void *v)
 /*
  * return count of bytes in transmit buffer
  */
-static int chars_in_buffer(struct tty_struct *tty)
+static unsigned int chars_in_buffer(struct tty_struct *tty)
 {
 	struct slgt_info *info = tty->driver_data;
-	int count;
+	unsigned int count;
 	if (sanity_check(info, tty->name, "chars_in_buffer"))
 		return 0;
 	count = tbuf_bytes(info);
-	DBGINFO(("%s chars_in_buffer()=%d\n", info->device_name, count));
+	DBGINFO(("%s chars_in_buffer()=%u\n", info->device_name, count));
 	return count;
 }
 
@@ -1281,7 +1281,7 @@ static void throttle(struct tty_struct * tty)
 	if (C_CRTSCTS(tty)) {
 		spin_lock_irqsave(&info->lock,flags);
 		info->signals &= ~SerialSignal_RTS;
-		set_signals(info);
+		set_gtsignals(info);
 		spin_unlock_irqrestore(&info->lock,flags);
 	}
 }
@@ -1306,7 +1306,7 @@ static void unthrottle(struct tty_struct * tty)
 	if (C_CRTSCTS(tty)) {
 		spin_lock_irqsave(&info->lock,flags);
 		info->signals |= SerialSignal_RTS;
-		set_signals(info);
+		set_gtsignals(info);
 		spin_unlock_irqrestore(&info->lock,flags);
 	}
 }
@@ -1477,7 +1477,7 @@ static int hdlcdev_open(struct net_device *dev)
 
 	/* inform generic HDLC layer of current DCD status */
 	spin_lock_irqsave(&info->lock, flags);
-	get_signals(info);
+	get_gtsignals(info);
 	spin_unlock_irqrestore(&info->lock, flags);
 	if (info->signals & SerialSignal_DCD)
 		netif_carrier_on(dev);
@@ -2232,7 +2232,7 @@ static void isr_txeom(struct slgt_info *info, unsigned short status)
 		if (info->params.mode != MGSL_MODE_ASYNC && info->drop_rts_on_tx_done) {
 			info->signals &= ~SerialSignal_RTS;
 			info->drop_rts_on_tx_done = false;
-			set_signals(info);
+			set_gtsignals(info);
 		}
 
 #if SYNCLINK_GENERIC_HDLC
@@ -2241,7 +2241,7 @@ static void isr_txeom(struct slgt_info *info, unsigned short status)
 		else
 #endif
 		{
-			if (info->port.tty && (info->port.tty->stopped || info->port.tty->hw_stopped)) {
+			if (info->port.tty && (info->port.tty->flow.stopped || info->port.tty->hw_stopped)) {
 				tx_stop(info);
 				return;
 			}
@@ -2397,7 +2397,7 @@ static void shutdown(struct slgt_info *info)
 
  	if (!info->port.tty || info->port.tty->termios.c_cflag & HUPCL) {
 		info->signals &= ~(SerialSignal_RTS | SerialSignal_DTR);
-		set_signals(info);
+		set_gtsignals(info);
 	}
 
 	flush_cond_wait(&info->gpio_wait_q);
@@ -2425,7 +2425,7 @@ static void program_hw(struct slgt_info *info)
 	else
 		async_mode(info);
 
-	set_signals(info);
+	set_gtsignals(info);
 
 	info->dcd_chkcount = 0;
 	info->cts_chkcount = 0;
@@ -2433,7 +2433,7 @@ static void program_hw(struct slgt_info *info)
 	info->dsr_chkcount = 0;
 
 	slgt_irq_on(info, IRQ_DCD | IRQ_CTS | IRQ_DSR | IRQ_RI);
-	get_signals(info);
+	get_gtsignals(info);
 
 	if (info->netcount ||
 	    (info->port.tty && info->port.tty->termios.c_cflag & CREAD))
@@ -2465,14 +2465,7 @@ static void change_params(struct slgt_info *info)
 
 	/* byte size and parity */
 
-	switch (cflag & CSIZE) {
-	case CS5: info->params.data_bits = 5; break;
-	case CS6: info->params.data_bits = 6; break;
-	case CS7: info->params.data_bits = 7; break;
-	case CS8: info->params.data_bits = 8; break;
-	default:  info->params.data_bits = 7; break;
-	}
-
+	info->params.data_bits = tty_get_char_size(cflag);
 	info->params.stop_bits = (cflag & CSTOPB) ? 2 : 1;
 
 	if (cflag & PARENB)
@@ -2677,7 +2670,7 @@ static int wait_mgsl_event(struct slgt_info *info, int __user *mask_ptr)
 	spin_lock_irqsave(&info->lock,flags);
 
 	/* return immediately if state matches requested events */
-	get_signals(info);
+	get_gtsignals(info);
 	s = info->signals;
 
 	events = mask &
@@ -3095,7 +3088,7 @@ static int tiocmget(struct tty_struct *tty)
  	unsigned long flags;
 
 	spin_lock_irqsave(&info->lock,flags);
- 	get_signals(info);
+ 	get_gtsignals(info);
 	spin_unlock_irqrestore(&info->lock,flags);
 
 	result = ((info->signals & SerialSignal_RTS) ? TIOCM_RTS:0) +
@@ -3134,7 +3127,7 @@ static int tiocmset(struct tty_struct *tty,
 		info->signals &= ~SerialSignal_DTR;
 
 	spin_lock_irqsave(&info->lock,flags);
-	set_signals(info);
+	set_gtsignals(info);
 	spin_unlock_irqrestore(&info->lock,flags);
 	return 0;
 }
@@ -3145,7 +3138,7 @@ static int carrier_raised(struct tty_port *port)
 	struct slgt_info *info = container_of(port, struct slgt_info, port);
 
 	spin_lock_irqsave(&info->lock,flags);
-	get_signals(info);
+	get_gtsignals(info);
 	spin_unlock_irqrestore(&info->lock,flags);
 	return (info->signals & SerialSignal_DCD) ? 1 : 0;
 }
@@ -3160,7 +3153,7 @@ static void dtr_rts(struct tty_port *port, int on)
 		info->signals |= SerialSignal_RTS | SerialSignal_DTR;
 	else
 		info->signals &= ~(SerialSignal_RTS | SerialSignal_DTR);
-	set_signals(info);
+	set_gtsignals(info);
 	spin_unlock_irqrestore(&info->lock,flags);
 }
 
@@ -3958,10 +3951,10 @@ static void tx_start(struct slgt_info *info)
 
 		if (info->params.mode != MGSL_MODE_ASYNC) {
 			if (info->params.flags & HDLC_FLAG_AUTO_RTS) {
-				get_signals(info);
+				get_gtsignals(info);
 				if (!(info->signals & SerialSignal_RTS)) {
 					info->signals |= SerialSignal_RTS;
-					set_signals(info);
+					set_gtsignals(info);
 					info->drop_rts_on_tx_done = true;
 				}
 			}
@@ -4015,7 +4008,7 @@ static void reset_port(struct slgt_info *info)
 	rx_stop(info);
 
 	info->signals &= ~(SerialSignal_RTS | SerialSignal_DTR);
-	set_signals(info);
+	set_gtsignals(info);
 
 	slgt_irq_off(info, IRQ_ALL | IRQ_MASTER);
 }
@@ -4437,7 +4430,7 @@ static void tx_set_idle(struct slgt_info *info)
 /*
  * get state of V24 status (input) signals
  */
-static void get_signals(struct slgt_info *info)
+static void get_gtsignals(struct slgt_info *info)
 {
 	unsigned short status = rd_reg16(info, SSR);
 
@@ -4499,7 +4492,7 @@ static void msc_set_vcr(struct slgt_info *info)
 /*
  * set state of V24 control (output) signals
  */
-static void set_signals(struct slgt_info *info)
+static void set_gtsignals(struct slgt_info *info)
 {
 	unsigned char val = rd_reg8(info, VCR);
 	if (info->signals & SerialSignal_DTR)
