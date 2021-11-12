@@ -255,13 +255,16 @@ kvm_novcpu_exit:
  * r3 contains the SRR1 wakeup value, SRR1 is trashed.
  */
 _GLOBAL(idle_kvm_start_guest)
-	ld	r4,PACAEMERGSP(r13)
 	mfcr	r5
 	mflr	r0
-	std	r1,0(r4)
-	std	r5,8(r4)
-	std	r0,16(r4)
-	subi	r1,r4,STACK_FRAME_OVERHEAD
+	std	r5, 8(r1)	// Save CR in caller's frame
+	std	r0, 16(r1)	// Save LR in caller's frame
+	// Create frame on emergency stack
+	ld	r4, PACAEMERGSP(r13)
+	stdu	r1, -SWITCH_FRAME_SIZE(r4)
+	// Switch to new frame on emergency stack
+	mr	r1, r4
+	std	r3, 32(r1)	// Save SRR1 wakeup value
 	SAVE_NVGPRS(r1)
 
 	/*
@@ -312,6 +315,10 @@ kvm_unsplit_wakeup:
 	beq	kvm_no_guest
 
 kvm_secondary_got_guest:
+
+	// About to go to guest, clear saved SRR1
+	li	r0, 0
+	std	r0, 32(r1)
 
 	/* Set HSTATE_DSCR(r13) to something sensible */
 	ld	r6, PACA_DSCR_DEFAULT(r13)
@@ -392,13 +399,12 @@ kvm_no_guest:
 	mfspr	r4, SPRN_LPCR
 	rlwimi	r4, r3, 0, LPCR_PECE0 | LPCR_PECE1
 	mtspr	SPRN_LPCR, r4
-	/* set up r3 for return */
-	mfspr	r3,SPRN_SRR1
+	// Return SRR1 wakeup value, or 0 if we went into the guest
+	ld	r3, 32(r1)
 	REST_NVGPRS(r1)
-	addi	r1, r1, STACK_FRAME_OVERHEAD
-	ld	r0, 16(r1)
-	ld	r5, 8(r1)
-	ld	r1, 0(r1)
+	ld	r1, 0(r1)	// Switch back to caller stack
+	ld	r0, 16(r1)	// Reload LR
+	ld	r5, 8(r1)	// Reload CR
 	mtlr	r0
 	mtcr	r5
 	blr
@@ -1088,12 +1094,6 @@ END_FTR_SECTION_IFSET(CPU_FTR_HAS_PPR)
 	cmpwi	r12, BOOK3S_INTERRUPT_H_INST_STORAGE
 	beq	kvmppc_hisi
 
-#ifdef CONFIG_PPC_TRANSACTIONAL_MEM
-	/* For softpatch interrupt, go off and do TM instruction emulation */
-	cmpwi	r12, BOOK3S_INTERRUPT_HV_SOFTPATCH
-	beq	kvmppc_tm_emul
-#endif
-
 	/* See if this is a leftover HDEC interrupt */
 	cmpwi	r12,BOOK3S_INTERRUPT_HV_DECREMENTER
 	bne	2f
@@ -1598,42 +1598,6 @@ maybe_reenter_guest:
 	mr	r4, r9
 	blt	deliver_guest_interrupt
 	b	guest_exit_cont
-
-#ifdef CONFIG_PPC_TRANSACTIONAL_MEM
-/*
- * Softpatch interrupt for transactional memory emulation cases
- * on POWER9 DD2.2.  This is early in the guest exit path - we
- * haven't saved registers or done a treclaim yet.
- */
-kvmppc_tm_emul:
-	/* Save instruction image in HEIR */
-	mfspr	r3, SPRN_HEIR
-	stw	r3, VCPU_HEIR(r9)
-
-	/*
-	 * The cases we want to handle here are those where the guest
-	 * is in real suspend mode and is trying to transition to
-	 * transactional mode.
-	 */
-	lbz	r0, HSTATE_FAKE_SUSPEND(r13)
-	cmpwi	r0, 0		/* keep exiting guest if in fake suspend */
-	bne	guest_exit_cont
-	rldicl	r3, r11, 64 - MSR_TS_S_LG, 62
-	cmpwi	r3, 1		/* or if not in suspend state */
-	bne	guest_exit_cont
-
-	/* Call C code to do the emulation */
-	mr	r3, r9
-	bl	kvmhv_p9_tm_emulation_early
-	nop
-	ld	r9, HSTATE_KVM_VCPU(r13)
-	li	r12, BOOK3S_INTERRUPT_HV_SOFTPATCH
-	cmpwi	r3, 0
-	beq	guest_exit_cont		/* continue exiting if not handled */
-	ld	r10, VCPU_PC(r9)
-	ld	r11, VCPU_MSR(r9)
-	b	fast_interrupt_c_return	/* go back to guest if handled */
-#endif /* CONFIG_PPC_TRANSACTIONAL_MEM */
 
 /*
  * Check whether an HDSI is an HPTE not found fault or something else.
