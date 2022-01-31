@@ -447,6 +447,7 @@ CONFIG_OMAP2_DSS_DSI=y
 ## file: drivers/gpu/drm/panel/Kconfig
 ##
 CONFIG_DRM_PANEL_SIMPLE=m
+CONFIG_DRM_PANEL_EDP=m
 CONFIG_DRM_PANEL_ORISETECH_OTM8009A=m
 CONFIG_DRM_PANEL_RASPBERRYPI_TOUCHSCREEN=m
 CONFIG_DRM_PANEL_SONY_ACX565AKM=m
@@ -588,6 +589,15 @@ CONFIG_I2C_MUX_PINCTRL=m
 CONFIG_IIO=m
 
 ##
+## file: drivers/iio/adc/Kconfig
+##
+CONFIG_ASPEED_ADC=m
+CONFIG_EXYNOS_ADC=m
+CONFIG_ROCKCHIP_SARADC=m
+CONFIG_TI_AM335X_ADC=m
+CONFIG_TWL4030_MADC=m
+
+##
 ## file: drivers/input/keyboard/Kconfig
 ##
 CONFIG_KEYBOARD_GPIO=y
@@ -670,7 +680,6 @@ CONFIG_BCM2835_MBOX=y
 ##
 ## file: drivers/media/Kconfig
 ##
-CONFIG_MEDIA_SUPPORT=y
 CONFIG_MEDIA_CONTROLLER=y
 
 ##
@@ -1617,6 +1626,11 @@ CONFIG_SND_AUDIO_GRAPH_CARD=m
 ## file: sound/soc/kirkwood/Kconfig
 ##
 CONFIG_SND_KIRKWOOD_SOC=m
+
+##
+## file: sound/soc/meson/Kconfig
+##
+CONFIG_SND_MESON_GX_SOUND_CARD=m
 
 ##
 ## file: sound/soc/pxa/Kconfig
