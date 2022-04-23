@@ -6,8 +6,7 @@ kernel-arch: x86
 
 [build]
 image-file: arch/x86/boot/bzImage
-# Kernel modules don't need be signed in Kaisen Linux
-signed-code: false
+signed-code: true
 vdso: true
 
 [image]

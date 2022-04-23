@@ -7,8 +7,7 @@ featuresets:
 
 [build]
 image-file: arch/arm64/boot/Image
-# Kernel modules don't need be signed in Kaisen Linux
-signed-code: false
+signed-code: true
 vdso: true
 
 [image]
