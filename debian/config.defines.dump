@@ -8,7 +8,7 @@ tp3
 (dp4
 Vabiname
 p5
-V1
+Vkaisen1
 p6
 sVignore-changes
 p7
@@ -460,7 +460,7 @@ Varch/x86/boot/bzImage
 p244
 sVsigned-code
 p245
-I01
+I00
 sVvdso
 p246
 I01
@@ -607,7 +607,7 @@ Varch/arm64/boot/Image
 p324
 sVsigned-code
 p325
-I01
+I00
 sVvdso
 p326
 I01
@@ -1087,7 +1087,7 @@ Varch/x86/boot/bzImage
 p582
 sVsigned-code
 p583
-I01
+I00
 sVvdso
 p584
 I01
@@ -1709,11 +1709,11 @@ tp913
 (dp914
 Vhardware
 p915
-VMIPS Generic (mips64r2eb)
+VMIPS Generic (mips64r2el)
 p916
 sVhardware-long
 p917
-VMIPS Generic platform (mips64r2eb)
+VMIPS Generic platform (mips64r2el)
 p918
 ss(Vimage
 p919
@@ -3048,18 +3048,18 @@ tp1636
 (dp1637
 Vsource
 p1638
-V5.17.3-1
+V5.19-1kaisen
 p1639
 sVupstream
 p1640
-V5.17
+V5.19
 p1641
 sVabiname_base
 p1642
-V5.17.0
+V5.19.0
 p1643
 sVabiname
 p1644
-V5.17.0-1
+V5.19.0-kaisen1
 p1645
 ss.

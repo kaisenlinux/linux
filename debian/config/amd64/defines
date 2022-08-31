@@ -5,8 +5,9 @@ featuresets:
 kernel-arch: x86
 
 [build]
+#Modules don't need be signed in Kaisen Linux
 image-file: arch/x86/boot/bzImage
-signed-code: true
+signed-code: false
 vdso: true
 
 [image]

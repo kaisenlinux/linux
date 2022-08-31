@@ -504,7 +504,7 @@ static int show_map_close_json(int fd, struct bpf_map_info *info)
 	jsonw_uint_field(json_wtr, "max_entries", info->max_entries);
 
 	if (memlock)
-		jsonw_int_field(json_wtr, "bytes_memlock", atoi(memlock));
+		jsonw_int_field(json_wtr, "bytes_memlock", atoll(memlock));
 	free(memlock);
 
 	if (info->type == BPF_MAP_TYPE_PROG_ARRAY) {
@@ -1341,8 +1341,6 @@ static int do_create(int argc, char **argv)
 		p_err("map name not specified");
 		goto exit;
 	}
-
-	set_max_rlimit();
 
 	fd = bpf_map_create(map_type, map_name, key_size, value_size, max_entries, &attr);
 	if (fd < 0) {

@@ -6,8 +6,9 @@ featuresets:
  rt
 
 [build]
+#Modules don't need be signed in Kaisen Linux
 image-file: arch/arm64/boot/Image
-signed-code: true
+signed-code: false
 vdso: true
 
 [image]

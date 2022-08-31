@@ -71,7 +71,8 @@ build-arch-arch: \
 	$(call if_package, bpftool,                      build-bpftool) \
 	$(call if_package, usbip,                        build-usbip) \
 	$(call if_package, linux-cpupower,               build-cpupower) \
-	$(call if_package, hyperv-daemons,               build-hyperv-daemons)
+	$(call if_package, hyperv-daemons,               build-hyperv-daemons) \
+	$(call if_package, rtla,                         build-rtla)
 binary-arch-arch: \
 	$(call if_package, $(SOURCE_BASENAME)-config-$(VERSION), install-config_$(ARCH)) \
 	$(call if_package, linux-libc-dev,               install-libc-dev_$(ARCH)) \
@@ -81,7 +82,8 @@ binary-arch-arch: \
 	$(call if_package, bpftool,                      install-bpftool) \
 	$(call if_package, usbip,                        install-usbip) \
 	$(call if_package, linux-cpupower,               install-cpupower) \
-	$(call if_package, hyperv-daemons,               install-hyperv-daemons)
+	$(call if_package, hyperv-daemons,               install-hyperv-daemons) \
+	$(call if_package, rtla,                         install-rtla)
 
 build-indep: \
 	$(call if_package, $(SOURCE_BASENAME)-doc-$(VERSION), $(STAMPS_DIR)/build-doc)
@@ -115,7 +117,7 @@ source-featureset: $(STAMPS_DIR)/source_$(FEATURESET)
 $(BUILD_DIR)/config.$(ARCH)_$(FEATURESET)_$(FLAVOUR): $(KCONFIG)
 	mkdir -p '$(dir $@)'
 	debian/bin/kconfig.py '$@' $(KCONFIG) $(KCONFIG_OPTIONS) \
-		$(call if_profile, pkg.linux.nokerneldbginfo pkg.linux.quick,-o DEBUG_INFO=n)
+		$(call if_profile, pkg.linux.nokerneldbginfo pkg.linux.quick,-o DEBUG_INFO_NONE=y -o DEBUG_INFO_DWARF_TOOLCHAIN_DEFAULT=n)
 
 define copy_source
 mkdir -p '$(1)'
@@ -646,7 +648,9 @@ endif
 	dh_fixperms
 	dh_installdeb
 	dh_shlibdeps
-	dh_gencontrol
+	VERSION="$$(($$(sed -ne 's,^#define LIBBPF_MAJOR_VERSION \(.*\)$$,\1,p' tools/lib/bpf/libbpf_version.h) + 6)).$$(sed -ne 's,^#define LIBBPF_MINOR_VERSION \(.*\)$$,\1,p' tools/lib/bpf/libbpf_version.h).$$(sed -ne 's,^#define BPFTOOL_PATCH_VERSION \(.*\)$$,\1,p' tools/bpf/bpftool/main.c)" && \
+	test -n "$$VERSION" -a -n "$(DEB_VERSION)" && \
+	dh_gencontrol -- -v$$VERSION+$(DEB_VERSION)
 	dh_md5sums
 	dh_builddeb -- $(BUILDDEB_ARGS)
 
@@ -823,6 +827,33 @@ install-bootwrapper: build-bootwrapper
 	dh_prep
 	$(call make-tools,arch/powerpc/boot) install DESTDIR=$(DIR) installdir=/usr/lib/$(PACKAGE_NAME)
 	dh_installchangelogs
+	dh_strip
+	dh_compress
+	dh_fixperms
+	dh_installdeb
+	dh_shlibdeps
+	dh_gencontrol
+	dh_md5sums
+	dh_builddeb -- $(BUILDDEB_ARGS)
+
+build-rtla: $(STAMPS_DIR)/build-tools-headers
+	$(call make-tools,tools/tracing/rtla)
+
+install-rtla: PACKAGE_NAME = rtla
+install-rtla: DH_OPTIONS = -p$(PACKAGE_NAME)
+install-rtla: DIR = $(CURDIR)/debian/$(PACKAGE_NAME)
+install-rtla: build-rtla
+	dh_testdir
+	dh_testroot
+	dh_prep
+	$(call make-tools,tools/tracing/rtla) install DESTDIR=$(DIR)
+	dh_install
+	dh_link
+	dh_installchangelogs
+ifeq (,$(filter nodoc,$(DEB_BUILD_PROFILES)))
+	dh_installdocs
+	dh_installman
+endif
 	dh_strip
 	dh_compress
 	dh_fixperms

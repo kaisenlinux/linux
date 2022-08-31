@@ -909,7 +909,7 @@ static inline void path_it_deinit(struct path_it *it)
 {
 	struct list_head *skip, *tmp;
 	/*
-	 * The skip_list is used only for the MIN_INFLIGHT policy.
+	 * The skip_list is used only for the MIN_INFLIGHT and MIN_LATENCY policies.
 	 * We need to remove paths from it, so that next IO can insert
 	 * paths (->mp_skip_entry) into a skip_list again.
 	 */
@@ -2785,7 +2785,7 @@ static void free_clt(struct rtrs_clt_sess *clt)
 /**
  * rtrs_clt_open() - Open a path to an RTRS server
  * @ops: holds the link event callback and the private pointer.
- * @sessname: name of the session
+ * @pathname: name of the path to an RTRS server
  * @paths: Paths to be established defined by their src and dst addresses
  * @paths_num: Number of elements in the @paths array
  * @port: port to be used by the RTRS session

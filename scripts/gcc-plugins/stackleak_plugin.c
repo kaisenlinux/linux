@@ -44,7 +44,7 @@ static bool verbose = false;
 static GTY(()) tree track_function_decl;
 
 static struct plugin_info stackleak_plugin_info = {
-	.version = "201707101337",
+	.version = PLUGIN_VERSION,
 	.help = "track-min-size=nn\ttrack stack for functions with a stack frame size >= nn bytes\n"
 		"arch=target_arch\tspecify target build arch\n"
 		"disable\t\tdo not activate the plugin\n"
@@ -462,6 +462,10 @@ static bool stackleak_gate(void)
 		if (STRING_EQUAL(section, ".cpuinit.text"))
 			return false;
 		if (STRING_EQUAL(section, ".meminit.text"))
+			return false;
+		if (STRING_EQUAL(section, ".noinstr.text"))
+			return false;
+		if (STRING_EQUAL(section, ".entry.text"))
 			return false;
 	}
 

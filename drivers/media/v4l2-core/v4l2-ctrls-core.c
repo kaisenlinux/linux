@@ -400,7 +400,7 @@ validate_vp9_seg_params(struct v4l2_vp9_segmentation *seg)
 	}
 
 	for (i = 0; i < ARRAY_SIZE(seg->feature_data); i++) {
-		const int range[] = { 255, 63, 3, 0 };
+		static const int range[] = { 255, 63, 3, 0 };
 
 		for (j = 0; j < ARRAY_SIZE(seg->feature_data[j]); j++) {
 			if (seg->feature_data[i][j] < -range[j] ||
@@ -1140,9 +1140,8 @@ int v4l2_ctrl_handler_init_class(struct v4l2_ctrl_handler *hdl,
 	INIT_LIST_HEAD(&hdl->ctrls);
 	INIT_LIST_HEAD(&hdl->ctrl_refs);
 	hdl->nr_of_buckets = 1 + nr_of_controls_hint / 8;
-	hdl->buckets = kvmalloc_array(hdl->nr_of_buckets,
-				      sizeof(hdl->buckets[0]),
-				      GFP_KERNEL | __GFP_ZERO);
+	hdl->buckets = kvcalloc(hdl->nr_of_buckets, sizeof(hdl->buckets[0]),
+				GFP_KERNEL);
 	hdl->error = hdl->buckets ? 0 : -ENOMEM;
 	v4l2_ctrl_handler_init_request(hdl);
 	return hdl->error;
