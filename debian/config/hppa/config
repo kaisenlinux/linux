@@ -27,13 +27,11 @@ CONFIG_CRYPTO_MANAGER_DISABLE_TESTS=y
 ## file: drivers/ata/Kconfig
 ##
 CONFIG_PATA_NS87415=m
-CONFIG_PATA_LEGACY=m
 
 ##
 ## file: drivers/block/Kconfig
 ##
 # CONFIG_BLK_DEV_FD is not set
-# CONFIG_BLK_DEV_SX8 is not set
 CONFIG_CDROM_PKTCDVD=m
 CONFIG_CDROM_PKTCDVD_BUFFERS=8
 # CONFIG_CDROM_PKTCDVD_WCACHE is not set
@@ -247,11 +245,6 @@ CONFIG_E100=m
 ## file: drivers/net/ethernet/natsemi/Kconfig
 ##
 CONFIG_NATSEMI=m
-
-##
-## file: drivers/net/ethernet/neterion/Kconfig
-##
-# CONFIG_VXGE is not set
 
 ##
 ## file: drivers/net/ethernet/nvidia/Kconfig
