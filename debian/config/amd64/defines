@@ -5,15 +5,14 @@ featuresets:
 kernel-arch: x86
 
 [build]
-# Modules don't need be signed in Kaisen Linux
 image-file: arch/x86/boot/bzImage
+#Modules don't need be signed in Kaisen Linux
 signed-code: false
 vdso: true
 
 [image]
 bootloaders: grub-pc grub-efi-amd64 extlinux
 install-stem: vmlinuz
-breaks: xserver-xorg-input-vmmouse (<< 1:13.0.99)
 
 [relations]
 headers%gcc-12: linux-compiler-gcc-12-x86

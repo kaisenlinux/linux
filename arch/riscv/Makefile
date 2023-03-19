@@ -80,6 +80,9 @@ ifeq ($(CONFIG_PERF_EVENTS),y)
         KBUILD_CFLAGS += -fno-omit-frame-pointer
 endif
 
+# Avoid generating .eh_frame sections.
+KBUILD_CFLAGS += -fno-asynchronous-unwind-tables -fno-unwind-tables
+
 KBUILD_CFLAGS_MODULE += $(call cc-option,-mno-relax)
 KBUILD_AFLAGS_MODULE += $(call as-option,-Wa$(comma)-mno-relax)
 
@@ -110,8 +113,6 @@ else
 KBUILD_IMAGE	:= $(boot)/Image.gz
 endif
 
-head-y := arch/riscv/kernel/head.o
-
 libs-y += arch/riscv/lib/
 libs-$(CONFIG_EFI_STUB) += $(objtree)/drivers/firmware/efi/libstub/lib.a
 
@@ -136,10 +137,14 @@ ifneq ($(CONFIG_XIP_KERNEL),y)
 ifeq ($(CONFIG_RISCV_M_MODE)$(CONFIG_SOC_CANAAN),yy)
 KBUILD_IMAGE := $(boot)/loader.bin
 else
+ifeq ($(CONFIG_EFI_ZBOOT),)
 KBUILD_IMAGE := $(boot)/Image.gz
+else
+KBUILD_IMAGE := $(boot)/vmlinuz.efi
 endif
 endif
-BOOT_TARGETS := Image Image.gz loader loader.bin xipImage
+endif
+BOOT_TARGETS := Image Image.gz loader loader.bin xipImage vmlinuz.efi
 
 all:	$(notdir $(KBUILD_IMAGE))
 
