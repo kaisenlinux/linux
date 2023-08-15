@@ -49,6 +49,7 @@
 #include "qplib_rcfw.h"
 #include "qplib_sp.h"
 #include "qplib_fp.h"
+#include "qplib_tlv.h"
 
 static void bnxt_qplib_service_creq(struct tasklet_struct *t);
 
@@ -85,8 +86,8 @@ done:
 	return count ? 0 : -ETIMEDOUT;
 };
 
-static int __send_message(struct bnxt_qplib_rcfw *rcfw, struct cmdq_base *req,
-			  struct creq_base *resp, void *sb, u8 is_block)
+static int __send_message(struct bnxt_qplib_rcfw *rcfw,
+			  struct bnxt_qplib_cmdqmsg *msg)
 {
 	struct bnxt_qplib_cmdq_ctx *cmdq = &rcfw->cmdq;
 	struct bnxt_qplib_hwq *hwq = &cmdq->hwq;
@@ -95,13 +96,13 @@ static int __send_message(struct bnxt_qplib_rcfw *rcfw, struct cmdq_base *req,
 	u32 sw_prod, cmdq_prod;
 	struct pci_dev *pdev;
 	unsigned long flags;
-	u32 size, opcode;
+	u32 bsize, opcode;
 	u16 cookie, cbit;
 	u8 *preq;
 
 	pdev = rcfw->pdev;
 
-	opcode = req->opcode;
+	opcode = __get_cmdq_base_opcode(msg->req, msg->req_sz);
 	if (!test_bit(FIRMWARE_INITIALIZED_FLAG, &cmdq->flags) &&
 	    (opcode != CMDQ_BASE_OPCODE_QUERY_FUNC &&
 	     opcode != CMDQ_BASE_OPCODE_INITIALIZE_FW &&
@@ -124,7 +125,7 @@ static int __send_message(struct bnxt_qplib_rcfw *rcfw, struct cmdq_base *req,
 	 * cmdqe
 	 */
 	spin_lock_irqsave(&hwq->lock, flags);
-	if (req->cmd_size >= HWQ_FREE_SLOTS(hwq)) {
+	if (msg->req->cmd_size >= HWQ_FREE_SLOTS(hwq)) {
 		dev_err(&pdev->dev, "RCFW: CMDQ is full!\n");
 		spin_unlock_irqrestore(&hwq->lock, flags);
 		return -EAGAIN;
@@ -133,36 +134,34 @@ static int __send_message(struct bnxt_qplib_rcfw *rcfw, struct cmdq_base *req,
 
 	cookie = cmdq->seq_num & RCFW_MAX_COOKIE_VALUE;
 	cbit = cookie % rcfw->cmdq_depth;
-	if (is_block)
+	if (msg->block)
 		cookie |= RCFW_CMD_IS_BLOCKING;
 
 	set_bit(cbit, cmdq->cmdq_bitmap);
-	req->cookie = cpu_to_le16(cookie);
+	__set_cmdq_base_cookie(msg->req, msg->req_sz, cpu_to_le16(cookie));
 	crsqe = &rcfw->crsqe_tbl[cbit];
 	if (crsqe->resp) {
 		spin_unlock_irqrestore(&hwq->lock, flags);
 		return -EBUSY;
 	}
 
-	size = req->cmd_size;
 	/* change the cmd_size to the number of 16byte cmdq unit.
 	 * req->cmd_size is modified here
 	 */
-	bnxt_qplib_set_cmd_slots(req);
+	bsize = bnxt_qplib_set_cmd_slots(msg->req);
 
-	memset(resp, 0, sizeof(*resp));
-	crsqe->resp = (struct creq_qp_event *)resp;
-	crsqe->resp->cookie = req->cookie;
-	crsqe->req_size = req->cmd_size;
-	if (req->resp_size && sb) {
-		struct bnxt_qplib_rcfw_sbuf *sbuf = sb;
-
-		req->resp_addr = cpu_to_le64(sbuf->dma_addr);
-		req->resp_size = (sbuf->size + BNXT_QPLIB_CMDQE_UNITS - 1) /
-				  BNXT_QPLIB_CMDQE_UNITS;
+	memset(msg->resp, 0, sizeof(*msg->resp));
+	crsqe->resp = (struct creq_qp_event *)msg->resp;
+	crsqe->resp->cookie = cpu_to_le16(cookie);
+	crsqe->req_size = __get_cmdq_base_cmd_size(msg->req, msg->req_sz);
+	if (__get_cmdq_base_resp_size(msg->req, msg->req_sz) && msg->sb) {
+		struct bnxt_qplib_rcfw_sbuf *sbuf = msg->sb;
+		__set_cmdq_base_resp_addr(msg->req, msg->req_sz, cpu_to_le64(sbuf->dma_addr));
+		__set_cmdq_base_resp_size(msg->req, msg->req_sz,
+					  ALIGN(sbuf->size, BNXT_QPLIB_CMDQE_UNITS));
 	}
 
-	preq = (u8 *)req;
+	preq = (u8 *)msg->req;
 	do {
 		/* Locate the next cmdq slot */
 		sw_prod = HWQ_CMP(hwq->prod, hwq);
@@ -174,14 +173,14 @@ static int __send_message(struct bnxt_qplib_rcfw *rcfw, struct cmdq_base *req,
 		}
 		/* Copy a segment of the req cmd to the cmdq */
 		memset(cmdqe, 0, sizeof(*cmdqe));
-		memcpy(cmdqe, preq, min_t(u32, size, sizeof(*cmdqe)));
-		preq += min_t(u32, size, sizeof(*cmdqe));
-		size -= min_t(u32, size, sizeof(*cmdqe));
+		memcpy(cmdqe, preq, min_t(u32, bsize, sizeof(*cmdqe)));
+		preq += min_t(u32, bsize, sizeof(*cmdqe));
+		bsize -= min_t(u32, bsize, sizeof(*cmdqe));
 		hwq->prod++;
-	} while (size > 0);
+	} while (bsize > 0);
 	cmdq->seq_num++;
 
-	cmdq_prod = hwq->prod;
+	cmdq_prod = hwq->prod & 0xFFFF;
 	if (test_bit(FIRMWARE_FIRST_FLAG, &cmdq->flags)) {
 		/* The very first doorbell write
 		 * is required to set this flag
@@ -191,7 +190,6 @@ static int __send_message(struct bnxt_qplib_rcfw *rcfw, struct cmdq_base *req,
 		cmdq_prod |= BIT(FIRMWARE_FIRST_FLAG);
 		clear_bit(FIRMWARE_FIRST_FLAG, &cmdq->flags);
 	}
-
 	/* ring CMDQ DB */
 	wmb();
 	writel(cmdq_prod, cmdq->cmdq_mbox.prod);
@@ -203,11 +201,9 @@ done:
 }
 
 int bnxt_qplib_rcfw_send_message(struct bnxt_qplib_rcfw *rcfw,
-				 struct cmdq_base *req,
-				 struct creq_base *resp,
-				 void *sb, u8 is_block)
+				 struct bnxt_qplib_cmdqmsg *msg)
 {
-	struct creq_qp_event *evnt = (struct creq_qp_event *)resp;
+	struct creq_qp_event *evnt = (struct creq_qp_event *)msg->resp;
 	u16 cookie;
 	u8 opcode, retry_cnt = 0xFF;
 	int rc = 0;
@@ -217,23 +213,23 @@ int bnxt_qplib_rcfw_send_message(struct bnxt_qplib_rcfw *rcfw,
 		return 0;
 
 	do {
-		opcode = req->opcode;
-		rc = __send_message(rcfw, req, resp, sb, is_block);
-		cookie = le16_to_cpu(req->cookie) & RCFW_MAX_COOKIE_VALUE;
+		opcode = __get_cmdq_base_opcode(msg->req, msg->req_sz);
+		rc = __send_message(rcfw, msg);
+		cookie = le16_to_cpu(__get_cmdq_base_cookie(msg->req, msg->req_sz)) &
+				RCFW_MAX_COOKIE_VALUE;
 		if (!rc)
 			break;
-
 		if (!retry_cnt || (rc != -EAGAIN && rc != -EBUSY)) {
 			/* send failed */
 			dev_err(&rcfw->pdev->dev, "cmdq[%#x]=%#x send failed\n",
 				cookie, opcode);
 			return rc;
 		}
-		is_block ? mdelay(1) : usleep_range(500, 1000);
+		msg->block ? mdelay(1) : usleep_range(500, 1000);
 
 	} while (retry_cnt--);
 
-	if (is_block)
+	if (msg->block)
 		rc = __block_for_resp(rcfw, cookie);
 	else
 		rc = __wait_for_resp(rcfw, cookie);
@@ -299,7 +295,8 @@ static int bnxt_qplib_process_func_event(struct bnxt_qplib_rcfw *rcfw,
 }
 
 static int bnxt_qplib_process_qp_event(struct bnxt_qplib_rcfw *rcfw,
-				       struct creq_qp_event *qp_event)
+				       struct creq_qp_event *qp_event,
+				       u32 *num_wait)
 {
 	struct creq_qp_error_notification *err_event;
 	struct bnxt_qplib_hwq *hwq = &rcfw->cmdq.hwq;
@@ -308,6 +305,7 @@ static int bnxt_qplib_process_qp_event(struct bnxt_qplib_rcfw *rcfw,
 	u16 cbit, blocked = 0;
 	struct pci_dev *pdev;
 	unsigned long flags;
+	u32 wait_cmds = 0;
 	__le16  mcookie;
 	u16 cookie;
 	int rc = 0;
@@ -367,9 +365,10 @@ static int bnxt_qplib_process_qp_event(struct bnxt_qplib_rcfw *rcfw,
 		crsqe->req_size = 0;
 
 		if (!blocked)
-			wake_up(&rcfw->cmdq.waitq);
+			wait_cmds++;
 		spin_unlock_irqrestore(&hwq->lock, flags);
 	}
+	*num_wait += wait_cmds;
 	return rc;
 }
 
@@ -383,6 +382,7 @@ static void bnxt_qplib_service_creq(struct tasklet_struct *t)
 	struct creq_base *creqe;
 	u32 sw_cons, raw_cons;
 	unsigned long flags;
+	u32 num_wakeup = 0;
 
 	/* Service the CREQ until budget is over */
 	spin_lock_irqsave(&hwq->lock, flags);
@@ -401,7 +401,8 @@ static void bnxt_qplib_service_creq(struct tasklet_struct *t)
 		switch (type) {
 		case CREQ_BASE_TYPE_QP_EVENT:
 			bnxt_qplib_process_qp_event
-				(rcfw, (struct creq_qp_event *)creqe);
+				(rcfw, (struct creq_qp_event *)creqe,
+				 &num_wakeup);
 			creq->stats.creq_qp_event_processed++;
 			break;
 		case CREQ_BASE_TYPE_FUNC_EVENT:
@@ -429,6 +430,8 @@ static void bnxt_qplib_service_creq(struct tasklet_struct *t)
 				      rcfw->res->cctx, true);
 	}
 	spin_unlock_irqrestore(&hwq->lock, flags);
+	if (num_wakeup)
+		wake_up_nr(&rcfw->cmdq.waitq, num_wakeup);
 }
 
 static irqreturn_t bnxt_qplib_creq_irq(int irq, void *dev_instance)
@@ -452,14 +455,17 @@ static irqreturn_t bnxt_qplib_creq_irq(int irq, void *dev_instance)
 /* RCFW */
 int bnxt_qplib_deinit_rcfw(struct bnxt_qplib_rcfw *rcfw)
 {
-	struct cmdq_deinitialize_fw req;
-	struct creq_deinitialize_fw_resp resp;
-	u16 cmd_flags = 0;
+	struct creq_deinitialize_fw_resp resp = {};
+	struct cmdq_deinitialize_fw req = {};
+	struct bnxt_qplib_cmdqmsg msg = {};
 	int rc;
 
-	RCFW_CMD_PREP(req, DEINITIALIZE_FW, cmd_flags);
-	rc = bnxt_qplib_rcfw_send_message(rcfw, (void *)&req, (void *)&resp,
-					  NULL, 0);
+	bnxt_qplib_rcfw_cmd_prep((struct cmdq_base *)&req,
+				 CMDQ_BASE_OPCODE_DEINITIALIZE_FW,
+				 sizeof(req));
+	bnxt_qplib_fill_cmdqmsg(&msg, &req, &resp, NULL,
+				sizeof(req), sizeof(resp), 0);
+	rc = bnxt_qplib_rcfw_send_message(rcfw, &msg);
 	if (rc)
 		return rc;
 
@@ -470,13 +476,15 @@ int bnxt_qplib_deinit_rcfw(struct bnxt_qplib_rcfw *rcfw)
 int bnxt_qplib_init_rcfw(struct bnxt_qplib_rcfw *rcfw,
 			 struct bnxt_qplib_ctx *ctx, int is_virtfn)
 {
-	struct creq_initialize_fw_resp resp;
-	struct cmdq_initialize_fw req;
-	u16 cmd_flags = 0;
+	struct creq_initialize_fw_resp resp = {};
+	struct cmdq_initialize_fw req = {};
+	struct bnxt_qplib_cmdqmsg msg = {};
 	u8 pgsz, lvl;
 	int rc;
 
-	RCFW_CMD_PREP(req, INITIALIZE_FW, cmd_flags);
+	bnxt_qplib_rcfw_cmd_prep((struct cmdq_base *)&req,
+				 CMDQ_BASE_OPCODE_INITIALIZE_FW,
+				 sizeof(req));
 	/* Supply (log-base-2-of-host-page-size - base-page-shift)
 	 * to bono to adjust the doorbell page sizes.
 	 */
@@ -545,8 +553,8 @@ config_vf_res:
 
 skip_ctx_setup:
 	req.stat_ctx_id = cpu_to_le32(ctx->stats.fw_id);
-	rc = bnxt_qplib_rcfw_send_message(rcfw, (void *)&req, (void *)&resp,
-					  NULL, 0);
+	bnxt_qplib_fill_cmdqmsg(&msg, &req, &resp, NULL, sizeof(req), sizeof(resp), 0);
+	rc = bnxt_qplib_rcfw_send_message(rcfw, &msg);
 	if (rc)
 		return rc;
 	set_bit(FIRMWARE_INITIALIZED_FLAG, &rcfw->cmdq.flags);
@@ -598,7 +606,7 @@ int bnxt_qplib_alloc_rcfw_channel(struct bnxt_qplib_res *res,
 		rcfw->cmdq_depth = BNXT_QPLIB_CMDQE_MAX_CNT_8192;
 
 	sginfo.pgsize = bnxt_qplib_cmdqe_page_size(rcfw->cmdq_depth);
-	hwq_attr.depth = rcfw->cmdq_depth;
+	hwq_attr.depth = rcfw->cmdq_depth & 0x7FFFFFFF;
 	hwq_attr.stride = BNXT_QPLIB_CMDQE_UNITS;
 	hwq_attr.type = HWQ_TYPE_CTX;
 	if (bnxt_qplib_alloc_init_hwq(&cmdq->hwq, &hwq_attr)) {
@@ -635,6 +643,10 @@ void bnxt_qplib_rcfw_stop_irq(struct bnxt_qplib_rcfw *rcfw, bool kill)
 	struct bnxt_qplib_creq_ctx *creq;
 
 	creq = &rcfw->creq;
+
+	if (!creq->requested)
+		return;
+
 	tasklet_disable(&creq->creq_tasklet);
 	/* Mask h/w interrupts */
 	bnxt_qplib_ring_nq_db(&creq->creq_db.dbinfo, rcfw->res->cctx, false);
@@ -643,10 +655,10 @@ void bnxt_qplib_rcfw_stop_irq(struct bnxt_qplib_rcfw *rcfw, bool kill)
 	if (kill)
 		tasklet_kill(&creq->creq_tasklet);
 
-	if (creq->requested) {
-		free_irq(creq->msix_vec, rcfw);
-		creq->requested = false;
-	}
+	free_irq(creq->msix_vec, rcfw);
+	kfree(creq->irq_name);
+	creq->irq_name = NULL;
+	creq->requested = false;
 }
 
 void bnxt_qplib_disable_rcfw_channel(struct bnxt_qplib_rcfw *rcfw)
@@ -678,9 +690,11 @@ int bnxt_qplib_rcfw_start_irq(struct bnxt_qplib_rcfw *rcfw, int msix_vector,
 			      bool need_init)
 {
 	struct bnxt_qplib_creq_ctx *creq;
+	struct bnxt_qplib_res *res;
 	int rc;
 
 	creq = &rcfw->creq;
+	res = rcfw->res;
 
 	if (creq->requested)
 		return -EFAULT;
@@ -690,13 +704,22 @@ int bnxt_qplib_rcfw_start_irq(struct bnxt_qplib_rcfw *rcfw, int msix_vector,
 		tasklet_setup(&creq->creq_tasklet, bnxt_qplib_service_creq);
 	else
 		tasklet_enable(&creq->creq_tasklet);
+
+	creq->irq_name = kasprintf(GFP_KERNEL, "bnxt_re-creq@pci:%s",
+				   pci_name(res->pdev));
+	if (!creq->irq_name)
+		return -ENOMEM;
 	rc = request_irq(creq->msix_vec, bnxt_qplib_creq_irq, 0,
-			 "bnxt_qplib_creq", rcfw);
-	if (rc)
+			 creq->irq_name, rcfw);
+	if (rc) {
+		kfree(creq->irq_name);
+		creq->irq_name = NULL;
+		tasklet_disable(&creq->creq_tasklet);
 		return rc;
+	}
 	creq->requested = true;
 
-	bnxt_qplib_ring_nq_db(&creq->creq_db.dbinfo, rcfw->res->cctx, true);
+	bnxt_qplib_ring_nq_db(&creq->creq_db.dbinfo, res->cctx, true);
 
 	return 0;
 }
