@@ -345,10 +345,9 @@ static int load_elf_fdpic_binary(struct linux_binprm *bprm)
 	/* there's now no turning back... the old userspace image is dead,
 	 * defunct, deceased, etc.
 	 */
+	SET_PERSONALITY(exec_params.hdr);
 	if (elf_check_fdpic(&exec_params.hdr))
-		set_personality(PER_LINUX_FDPIC);
-	else
-		set_personality(PER_LINUX);
+		current->personality |= PER_LINUX_FDPIC;
 	if (elf_read_implies_exec(&exec_params.hdr, executable_stack))
 		current->personality |= READ_IMPLIES_EXEC;
 
@@ -743,12 +742,12 @@ static int elf_fdpic_map_file(struct elf_fdpic_params *params,
 	struct elf32_fdpic_loadmap *loadmap;
 #ifdef CONFIG_MMU
 	struct elf32_fdpic_loadseg *mseg;
+	unsigned long load_addr;
 #endif
 	struct elf32_fdpic_loadseg *seg;
 	struct elf32_phdr *phdr;
-	unsigned long load_addr, stop;
 	unsigned nloads, tmp;
-	size_t size;
+	unsigned long stop;
 	int loop, ret;
 
 	/* allocate a load map table */
@@ -760,8 +759,7 @@ static int elf_fdpic_map_file(struct elf_fdpic_params *params,
 	if (nloads == 0)
 		return -ELIBBAD;
 
-	size = sizeof(*loadmap) + nloads * sizeof(*seg);
-	loadmap = kzalloc(size, GFP_KERNEL);
+	loadmap = kzalloc(struct_size(loadmap, segs, nloads), GFP_KERNEL);
 	if (!loadmap)
 		return -ENOMEM;
 
@@ -769,9 +767,6 @@ static int elf_fdpic_map_file(struct elf_fdpic_params *params,
 
 	loadmap->version = ELF32_FDPIC_LOADMAP_VERSION;
 	loadmap->nsegs = nloads;
-
-	load_addr = params->load_addr;
-	seg = loadmap->segs;
 
 	/* map the requested LOADs into the memory space */
 	switch (params->flags & ELF_FDPIC_FLAG_ARRANGEMENT) {
@@ -1269,7 +1264,7 @@ static inline void fill_elf_note_phdr(struct elf_phdr *phdr, int sz, loff_t offs
 	phdr->p_filesz = sz;
 	phdr->p_memsz = 0;
 	phdr->p_flags = 0;
-	phdr->p_align = 0;
+	phdr->p_align = 4;
 	return;
 }
 

@@ -532,7 +532,7 @@ struct smb_version_operations {
 	/* Check for STATUS_IO_TIMEOUT */
 	bool (*is_status_io_timeout)(char *buf);
 	/* Check for STATUS_NETWORK_NAME_DELETED */
-	void (*is_network_name_deleted)(char *buf, struct TCP_Server_Info *srv);
+	bool (*is_network_name_deleted)(char *buf, struct TCP_Server_Info *srv);
 };
 
 struct smb_version_values {
@@ -729,6 +729,7 @@ struct TCP_Server_Info {
 	 */
 #define CIFS_SERVER_IS_CHAN(server)	(!!(server)->primary_server)
 	struct TCP_Server_Info *primary_server;
+	__u16 channel_sequence_num;  /* incremented on primary channel on each chan reconnect */
 
 #ifdef CONFIG_CIFS_SWN_UPCALL
 	bool use_swn_dstaddr;
@@ -1062,6 +1063,7 @@ struct cifs_ses {
 	unsigned long chans_need_reconnect;
 	/* ========= end: protected by chan_lock ======== */
 	struct cifs_ses *dfs_root_ses;
+	struct nls_table *local_nls;
 };
 
 static inline bool
@@ -1774,6 +1776,7 @@ static inline bool is_retryable_error(int error)
 #define   MID_RETRY_NEEDED      8 /* session closed while this request out */
 #define   MID_RESPONSE_MALFORMED 0x10
 #define   MID_SHUTDOWN		 0x20
+#define   MID_RESPONSE_READY 0x40 /* ready for other process handle the rsp */
 
 /* Flags */
 #define   MID_WAIT_CANCELLED	 1 /* Cancelled while waiting for response */
@@ -2179,7 +2182,7 @@ static inline void cifs_sg_set_buf(struct sg_table *sgtable,
 		} while (buflen);
 	} else {
 		sg_set_page(&sgtable->sgl[sgtable->nents++],
-			    virt_to_page(addr), buflen, off);
+			    virt_to_page((void *)addr), buflen, off);
 	}
 }
 

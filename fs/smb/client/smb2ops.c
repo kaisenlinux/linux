@@ -109,7 +109,11 @@ smb2_add_credits(struct TCP_Server_Info *server,
 			server->credits--;
 			server->oplock_credits++;
 		}
-	}
+	} else if ((server->in_flight > 0) && (server->oplock_credits > 3) &&
+		   ((optype & CIFS_OP_MASK) == CIFS_OBREAK_OP))
+		/* if now have too many oplock credits, rebalance so don't starve normal ops */
+		change_conf(server);
+
 	scredits = *val;
 	in_flight = server->in_flight;
 	spin_unlock(&server->req_lock);
@@ -168,8 +172,17 @@ smb2_set_credits(struct TCP_Server_Info *server, const int val)
 
 	spin_lock(&server->req_lock);
 	server->credits = val;
-	if (val == 1)
+	if (val == 1) {
 		server->reconnect_instance++;
+		/*
+		 * ChannelSequence updated for all channels in primary channel so that consistent
+		 * across SMB3 requests sent on any channel. See MS-SMB2 3.2.4.1 and 3.2.7.1
+		 */
+		if (CIFS_SERVER_IS_CHAN(server))
+			server->primary_server->channel_sequence_num++;
+		else
+			server->channel_sequence_num++;
+	}
 	scredits = server->credits;
 	in_flight = server->in_flight;
 	spin_unlock(&server->req_lock);
@@ -284,7 +297,7 @@ smb2_adjust_credits(struct TCP_Server_Info *server,
 		cifs_server_dbg(VFS, "request has less credits (%d) than required (%d)",
 				credits->value, new_val);
 
-		return -ENOTSUPP;
+		return -EOPNOTSUPP;
 	}
 
 	spin_lock(&server->req_lock);
@@ -1146,7 +1159,7 @@ smb2_set_ea(const unsigned int xid, struct cifs_tcon *tcon,
 			/* Use a fudge factor of 256 bytes in case we collide
 			 * with a different set_EAs command.
 			 */
-			if(CIFSMaxBufSize - MAX_SMB2_CREATE_RESPONSE_SIZE -
+			if (CIFSMaxBufSize - MAX_SMB2_CREATE_RESPONSE_SIZE -
 			   MAX_SMB2_CLOSE_RESPONSE_SIZE - 256 <
 			   used_len + ea_name_len + ea_value_len + 1) {
 				rc = -ENOSPC;
@@ -2391,7 +2404,7 @@ smb2_is_status_io_timeout(char *buf)
 		return false;
 }
 
-static void
+static bool
 smb2_is_network_name_deleted(char *buf, struct TCP_Server_Info *server)
 {
 	struct smb2_hdr *shdr = (struct smb2_hdr *)buf;
@@ -2400,7 +2413,7 @@ smb2_is_network_name_deleted(char *buf, struct TCP_Server_Info *server)
 	struct cifs_tcon *tcon;
 
 	if (shdr->Status != STATUS_NETWORK_NAME_DELETED)
-		return;
+		return false;
 
 	/* If server is a channel, select the primary channel */
 	pserver = CIFS_SERVER_IS_CHAN(server) ? server->primary_server : server;
@@ -2415,11 +2428,13 @@ smb2_is_network_name_deleted(char *buf, struct TCP_Server_Info *server)
 				spin_unlock(&cifs_tcp_ses_lock);
 				pr_warn_once("Server share %s deleted.\n",
 					     tcon->tree_name);
-				return;
+				return true;
 			}
 		}
 	}
 	spin_unlock(&cifs_tcp_ses_lock);
+
+	return false;
 }
 
 static int
@@ -4374,8 +4389,8 @@ static void *smb2_get_aead_req(struct crypto_aead *tfm, struct smb_rqst *rqst,
 		}
 		sgtable.orig_nents = sgtable.nents;
 
-		rc = netfs_extract_iter_to_sg(iter, count, &sgtable,
-					      num_sgs - sgtable.nents, 0);
+		rc = extract_iter_to_sg(iter, count, &sgtable,
+					num_sgs - sgtable.nents, 0);
 		iov_iter_revert(iter, rc);
 		sgtable.orig_nents = sgtable.nents;
 	}
@@ -4410,6 +4425,8 @@ smb2_get_enc_key(struct TCP_Server_Info *server, __u64 ses_id, int enc, u8 *key)
 	}
 	spin_unlock(&cifs_tcp_ses_lock);
 
+	trace_smb3_ses_not_found(ses_id);
+
 	return -EAGAIN;
 }
 /*
@@ -4440,8 +4457,8 @@ crypt_message(struct TCP_Server_Info *server, int num_rqst,
 
 	rc = smb2_get_enc_key(server, le64_to_cpu(tr_hdr->SessionId), enc, key);
 	if (rc) {
-		cifs_server_dbg(VFS, "%s: Could not get %scryption key\n", __func__,
-			 enc ? "en" : "de");
+		cifs_server_dbg(FYI, "%s: Could not get %scryption key. sid: 0x%llx\n", __func__,
+			 enc ? "en" : "de", le64_to_cpu(tr_hdr->SessionId));
 		return rc;
 	}
 
@@ -4699,7 +4716,7 @@ handle_read_data(struct TCP_Server_Info *server, struct mid_q_entry *mid,
 
 	if (shdr->Command != SMB2_READ) {
 		cifs_server_dbg(VFS, "only big read responses are supported\n");
-		return -ENOTSUPP;
+		return -EOPNOTSUPP;
 	}
 
 	if (server->ops->is_session_expired &&

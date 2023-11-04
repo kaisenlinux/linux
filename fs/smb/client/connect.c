@@ -60,7 +60,7 @@ extern bool disable_legacy_dialects;
 #define TLINK_IDLE_EXPIRE	(600 * HZ)
 
 /* Drop the connection to not overload the server */
-#define NUM_STATUS_IO_TIMEOUT   5
+#define MAX_STATUS_IO_TIMEOUT   5
 
 static int ip_connect(struct TCP_Server_Info *server);
 static int generic_ip_connect(struct TCP_Server_Info *server);
@@ -1117,6 +1117,7 @@ cifs_demultiplex_thread(void *p)
 	struct mid_q_entry *mids[MAX_COMPOUND];
 	char *bufs[MAX_COMPOUND];
 	unsigned int noreclaim_flag, num_io_timeout = 0;
+	bool pending_reconnect = false;
 
 	noreclaim_flag = memalloc_noreclaim_save();
 	cifs_dbg(FYI, "Demultiplex PID: %d\n", task_pid_nr(current));
@@ -1156,6 +1157,8 @@ cifs_demultiplex_thread(void *p)
 		cifs_dbg(FYI, "RFC1002 header 0x%x\n", pdu_length);
 		if (!is_smb_response(server, buf[0]))
 			continue;
+
+		pending_reconnect = false;
 next_pdu:
 		server->pdu_size = pdu_length;
 
@@ -1213,10 +1216,13 @@ next_pdu:
 		if (server->ops->is_status_io_timeout &&
 		    server->ops->is_status_io_timeout(buf)) {
 			num_io_timeout++;
-			if (num_io_timeout > NUM_STATUS_IO_TIMEOUT) {
-				cifs_reconnect(server, false);
+			if (num_io_timeout > MAX_STATUS_IO_TIMEOUT) {
+				cifs_server_dbg(VFS,
+						"Number of request timeouts exceeded %d. Reconnecting",
+						MAX_STATUS_IO_TIMEOUT);
+
+				pending_reconnect = true;
 				num_io_timeout = 0;
-				continue;
 			}
 		}
 
@@ -1226,9 +1232,14 @@ next_pdu:
 			if (mids[i] != NULL) {
 				mids[i]->resp_buf_size = server->pdu_size;
 
-				if (bufs[i] && server->ops->is_network_name_deleted)
-					server->ops->is_network_name_deleted(bufs[i],
-									server);
+				if (bufs[i] != NULL) {
+					if (server->ops->is_network_name_deleted &&
+					    server->ops->is_network_name_deleted(bufs[i],
+										 server)) {
+						cifs_server_dbg(FYI,
+								"Share deleted. Reconnect needed");
+					}
+				}
 
 				if (!mids[i]->multiRsp || mids[i]->multiEnd)
 					mids[i]->callback(mids[i]);
@@ -1263,6 +1274,11 @@ next_pdu:
 			buf = server->smallbuf;
 			goto next_pdu;
 		}
+
+		/* do this reconnect at the very end after processing all MIDs */
+		if (pending_reconnect)
+			cifs_reconnect(server, true);
+
 	} /* end while !EXITING */
 
 	/* buffer usually freed in free_mid - need to free it here on exit */
@@ -1670,6 +1686,7 @@ cifs_get_tcp_session(struct smb3_fs_context *ctx,
 		ctx->target_rfc1001_name, RFC1001_NAME_LEN_WITH_NULL);
 	tcp_ses->session_estab = false;
 	tcp_ses->sequence_number = 0;
+	tcp_ses->channel_sequence_num = 0; /* only tracked for primary channel */
 	tcp_ses->reconnect_instance = 1;
 	tcp_ses->lstrp = jiffies;
 	tcp_ses->compress_algorithm = cpu_to_le16(ctx->compression);
@@ -1826,6 +1843,10 @@ static int match_session(struct cifs_ses *ses, struct smb3_fs_context *ctx)
 			    CIFS_MAX_PASSWORD_LEN))
 			return 0;
 	}
+
+	if (strcmp(ctx->local_nls->charset, ses->local_nls->charset))
+		return 0;
+
 	return 1;
 }
 
@@ -1967,15 +1988,16 @@ void __cifs_put_smb_ses(struct cifs_ses *ses)
 		spin_unlock(&cifs_tcp_ses_lock);
 		return;
 	}
+	spin_lock(&ses->ses_lock);
+	if (ses->ses_status == SES_GOOD)
+		ses->ses_status = SES_EXITING;
+	spin_unlock(&ses->ses_lock);
 	spin_unlock(&cifs_tcp_ses_lock);
 
 	/* ses_count can never go negative */
 	WARN_ON(ses->ses_count < 0);
 
 	spin_lock(&ses->ses_lock);
-	if (ses->ses_status == SES_GOOD)
-		ses->ses_status = SES_EXITING;
-
 	if (ses->ses_status == SES_EXITING && server->ops->logoff) {
 		spin_unlock(&ses->ses_lock);
 		cifs_free_ipc(ses);
@@ -2269,6 +2291,7 @@ cifs_get_smb_ses(struct TCP_Server_Info *server, struct smb3_fs_context *ctx)
 
 	ses->sectype = ctx->sectype;
 	ses->sign = ctx->sign;
+	ses->local_nls = load_nls(ctx->local_nls->charset);
 
 	/* add server as first channel */
 	spin_lock(&ses->chan_lock);
@@ -2777,8 +2800,9 @@ cifs_match_super(struct super_block *sb, void *data)
 	}
 
 	tlink = cifs_get_tlink(cifs_sb_master_tlink(cifs_sb));
-	if (tlink == NULL) {
-		/* can not match superblock if tlink were ever null */
+	if (IS_ERR_OR_NULL(tlink)) {
+		pr_warn_once("%s: skip super matching due to bad tlink(%p)\n",
+			     __func__, tlink);
 		spin_unlock(&cifs_tcp_ses_lock);
 		return 0;
 	}
@@ -2866,9 +2890,9 @@ bind_socket(struct TCP_Server_Info *server)
 	if (server->srcaddr.ss_family != AF_UNSPEC) {
 		/* Bind to the specified local IP address */
 		struct socket *socket = server->ssocket;
-		rc = socket->ops->bind(socket,
-				       (struct sockaddr *) &server->srcaddr,
-				       sizeof(server->srcaddr));
+		rc = kernel_bind(socket,
+				 (struct sockaddr *) &server->srcaddr,
+				 sizeof(server->srcaddr));
 		if (rc < 0) {
 			struct sockaddr_in *saddr4;
 			struct sockaddr_in6 *saddr6;
@@ -2943,11 +2967,11 @@ ip_rfc1001_connect(struct TCP_Server_Info *server)
 static int
 generic_ip_connect(struct TCP_Server_Info *server)
 {
-	int rc = 0;
-	__be16 sport;
-	int slen, sfamily;
-	struct socket *socket = server->ssocket;
 	struct sockaddr *saddr;
+	struct socket *socket;
+	int slen, sfamily;
+	__be16 sport;
+	int rc = 0;
 
 	saddr = (struct sockaddr *) &server->dstaddr;
 
@@ -2969,18 +2993,19 @@ generic_ip_connect(struct TCP_Server_Info *server)
 				ntohs(sport));
 	}
 
-	if (socket == NULL) {
+	if (server->ssocket) {
+		socket = server->ssocket;
+	} else {
 		rc = __sock_create(cifs_net_ns(server), sfamily, SOCK_STREAM,
-				   IPPROTO_TCP, &socket, 1);
+				   IPPROTO_TCP, &server->ssocket, 1);
 		if (rc < 0) {
 			cifs_server_dbg(VFS, "Error %d creating socket\n", rc);
-			server->ssocket = NULL;
 			return rc;
 		}
 
 		/* BB other socket options to set KEEPALIVE, NODELAY? */
 		cifs_dbg(FYI, "Socket created\n");
-		server->ssocket = socket;
+		socket = server->ssocket;
 		socket->sk->sk_allocation = GFP_NOFS;
 		socket->sk->sk_use_task_frag = false;
 		if (sfamily == AF_INET6)
@@ -3016,8 +3041,8 @@ generic_ip_connect(struct TCP_Server_Info *server)
 		 socket->sk->sk_sndbuf,
 		 socket->sk->sk_rcvbuf, socket->sk->sk_rcvtimeo);
 
-	rc = socket->ops->connect(socket, saddr, slen,
-				  server->noblockcnt ? O_NONBLOCK : 0);
+	rc = kernel_connect(socket, saddr, slen,
+			    server->noblockcnt ? O_NONBLOCK : 0);
 	/*
 	 * When mounting SMB root file systems, we do not want to block in
 	 * connect. Otherwise bail out and then let cifs_reconnect() perform

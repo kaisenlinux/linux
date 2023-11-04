@@ -3045,9 +3045,8 @@ static int rvu_flr_init(struct rvu *rvu)
 			    cfg | BIT_ULL(22));
 	}
 
-	rvu->flr_wq = alloc_workqueue("rvu_afpf_flr",
-				      WQ_UNBOUND | WQ_HIGHPRI | WQ_MEM_RECLAIM,
-				       1);
+	rvu->flr_wq = alloc_ordered_workqueue("rvu_afpf_flr",
+					      WQ_HIGHPRI | WQ_MEM_RECLAIM);
 	if (!rvu->flr_wq)
 		return -ENOMEM;
 
@@ -3253,7 +3252,7 @@ static int rvu_probe(struct pci_dev *pdev, const struct pci_device_id *id)
 	rvu->ptp = ptp_get();
 	if (IS_ERR(rvu->ptp)) {
 		err = PTR_ERR(rvu->ptp);
-		if (err == -EPROBE_DEFER)
+		if (err)
 			goto err_release_regions;
 		rvu->ptp = NULL;
 	}

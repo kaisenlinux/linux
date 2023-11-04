@@ -95,6 +95,7 @@ sesInfoFree(struct cifs_ses *buf_to_free)
 		return;
 	}
 
+	unload_nls(buf_to_free->local_nls);
 	atomic_dec(&sesInfoAllocCount);
 	kfree(buf_to_free->serverOS);
 	kfree(buf_to_free->serverDomain);
@@ -1211,16 +1212,21 @@ int match_target_ip(struct TCP_Server_Info *server,
 
 int cifs_update_super_prepath(struct cifs_sb_info *cifs_sb, char *prefix)
 {
+	int rc;
+
 	kfree(cifs_sb->prepath);
+	cifs_sb->prepath = NULL;
 
 	if (prefix && *prefix) {
 		cifs_sb->prepath = cifs_sanitize_prepath(prefix, GFP_ATOMIC);
-		if (!cifs_sb->prepath)
-			return -ENOMEM;
-
-		convert_delimiter(cifs_sb->prepath, CIFS_DIR_SEP(cifs_sb));
-	} else
-		cifs_sb->prepath = NULL;
+		if (IS_ERR(cifs_sb->prepath)) {
+			rc = PTR_ERR(cifs_sb->prepath);
+			cifs_sb->prepath = NULL;
+			return rc;
+		}
+		if (cifs_sb->prepath)
+			convert_delimiter(cifs_sb->prepath, CIFS_DIR_SEP(cifs_sb));
+	}
 
 	cifs_sb->mnt_cifs_flags |= CIFS_MOUNT_USE_PREFIX_PATH;
 	return 0;

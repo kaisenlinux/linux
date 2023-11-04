@@ -57,6 +57,7 @@
 #include <linux/crc32poly.h>
 
 #include <net/checksum.h>
+#include <net/gso.h>
 #include <net/ip.h>
 
 #include <linux/io.h>
@@ -6880,7 +6881,10 @@ static int tg3_rx(struct tg3_napi *tnapi, int budget)
 
 			ri->data = NULL;
 
-			skb = build_skb(data, frag_size);
+			if (frag_size)
+				skb = build_skb(data, frag_size);
+			else
+				skb = slab_build_skb(data);
 			if (!skb) {
 				tg3_frag_free(frag_size != 0, data);
 				goto drop_it_no_recycle;

@@ -94,9 +94,6 @@ struct btrfs_transaction {
 	 */
 	atomic_t pending_ordered;
 	wait_queue_head_t pending_wait;
-
-	spinlock_t releasing_ebs_lock;
-	struct list_head releasing_ebs;
 };
 
 enum {
@@ -221,8 +218,8 @@ do {								\
 			(errno))) {					\
 			/* Stack trace printed. */			\
 		} else {						\
-			btrfs_debug((trans)->fs_info,			\
-				    "Transaction aborted (error %d)", \
+			btrfs_err((trans)->fs_info,			\
+				  "Transaction aborted (error %d)",	\
 				  (errno));			\
 		}						\
 	}							\
