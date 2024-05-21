@@ -26,15 +26,17 @@ gcc)
 llvm)
 	if [ "$SRCARCH" = s390 ]; then
 		echo 15.0.0
+	elif [ "$SRCARCH" = loongarch ]; then
+		echo 18.0.0
 	else
 		echo 11.0.0
 	fi
 	;;
 rustc)
-	echo 1.68.2
+	echo 1.74.1
 	;;
 bindgen)
-	echo 0.56.0
+	echo 0.65.1
 	;;
 *)
 	echo "$1: unknown tool" >&2

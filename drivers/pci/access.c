@@ -504,13 +504,12 @@ int pcie_capability_clear_and_set_word_unlocked(struct pci_dev *dev, int pos,
 	u16 val;
 
 	ret = pcie_capability_read_word(dev, pos, &val);
-	if (!ret) {
-		val &= ~clear;
-		val |= set;
-		ret = pcie_capability_write_word(dev, pos, val);
-	}
+	if (ret)
+		return ret;
 
-	return ret;
+	val &= ~clear;
+	val |= set;
+	return pcie_capability_write_word(dev, pos, val);
 }
 EXPORT_SYMBOL(pcie_capability_clear_and_set_word_unlocked);
 
@@ -535,13 +534,12 @@ int pcie_capability_clear_and_set_dword(struct pci_dev *dev, int pos,
 	u32 val;
 
 	ret = pcie_capability_read_dword(dev, pos, &val);
-	if (!ret) {
-		val &= ~clear;
-		val |= set;
-		ret = pcie_capability_write_dword(dev, pos, val);
-	}
+	if (ret)
+		return ret;
 
-	return ret;
+	val &= ~clear;
+	val |= set;
+	return pcie_capability_write_dword(dev, pos, val);
 }
 EXPORT_SYMBOL(pcie_capability_clear_and_set_dword);
 
@@ -600,3 +598,15 @@ int pci_write_config_dword(const struct pci_dev *dev, int where,
 	return pci_bus_write_config_dword(dev->bus, dev->devfn, where, val);
 }
 EXPORT_SYMBOL(pci_write_config_dword);
+
+void pci_clear_and_set_config_dword(const struct pci_dev *dev, int pos,
+				    u32 clear, u32 set)
+{
+	u32 val;
+
+	pci_read_config_dword(dev, pos, &val);
+	val &= ~clear;
+	val |= set;
+	pci_write_config_dword(dev, pos, val);
+}
+EXPORT_SYMBOL(pci_clear_and_set_config_dword);

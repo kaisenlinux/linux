@@ -246,7 +246,7 @@ void nfs_free_client(struct nfs_client *clp)
 	put_nfs_version(clp->cl_nfs_mod);
 	kfree(clp->cl_hostname);
 	kfree(clp->cl_acceptor);
-	kfree(clp);
+	kfree_rcu(clp, rcu);
 }
 EXPORT_SYMBOL_GPL(nfs_free_client);
 
@@ -517,6 +517,8 @@ int nfs_create_rpc_client(struct nfs_client *clp,
 		.authflavor	= flavor,
 		.cred		= cl_init->cred,
 		.xprtsec	= cl_init->xprtsec,
+		.connect_timeout = cl_init->connect_timeout,
+		.reconnect_timeout = cl_init->reconnect_timeout,
 	};
 
 	if (test_bit(NFS_CS_DISCRTRY, &clp->cl_flags))
@@ -1004,6 +1006,14 @@ struct nfs_server *nfs_alloc_server(void)
 }
 EXPORT_SYMBOL_GPL(nfs_alloc_server);
 
+static void delayed_free(struct rcu_head *p)
+{
+	struct nfs_server *server = container_of(p, struct nfs_server, rcu);
+
+	nfs_free_iostats(server->io_stats);
+	kfree(server);
+}
+
 /*
  * Free up a server record
  */
@@ -1029,10 +1039,9 @@ void nfs_free_server(struct nfs_server *server)
 
 	ida_destroy(&server->lockowner_id);
 	ida_destroy(&server->openowner_id);
-	nfs_free_iostats(server->io_stats);
 	put_cred(server->cred);
-	kfree(server);
 	nfs_release_automount_timer();
+	call_rcu(&server->rcu, delayed_free);
 }
 EXPORT_SYMBOL_GPL(nfs_free_server);
 

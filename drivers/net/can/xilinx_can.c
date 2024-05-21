@@ -20,8 +20,8 @@
 #include <linux/module.h>
 #include <linux/netdevice.h>
 #include <linux/of.h>
-#include <linux/of_device.h>
 #include <linux/platform_device.h>
+#include <linux/property.h>
 #include <linux/skbuff.h>
 #include <linux/spinlock.h>
 #include <linux/string.h>
@@ -30,6 +30,7 @@
 #include <linux/can/error.h>
 #include <linux/phy/phy.h>
 #include <linux/pm_runtime.h>
+#include <linux/reset.h>
 
 #define DRIVER_NAME	"xilinx_can"
 
@@ -200,6 +201,7 @@ struct xcan_devtype_data {
  * @can_clk:			Pointer to struct clk
  * @devtype:			Device type specific constants
  * @transceiver:		Optional pointer to associated CAN transceiver
+ * @rstc:			Pointer to reset control
  */
 struct xcan_priv {
 	struct can_priv can;
@@ -218,6 +220,7 @@ struct xcan_priv {
 	struct clk *can_clk;
 	struct xcan_devtype_data devtype;
 	struct phy *transceiver;
+	struct reset_control *rstc;
 };
 
 /* CAN Bittiming constants as per Xilinx CAN specs */
@@ -1723,8 +1726,7 @@ static int xcan_probe(struct platform_device *pdev)
 	struct net_device *ndev;
 	struct xcan_priv *priv;
 	struct phy *transceiver;
-	const struct of_device_id *of_id;
-	const struct xcan_devtype_data *devtype = &xcan_axi_data;
+	const struct xcan_devtype_data *devtype;
 	void __iomem *addr;
 	int ret;
 	int rx_max, tx_max;
@@ -1738,9 +1740,7 @@ static int xcan_probe(struct platform_device *pdev)
 		goto err;
 	}
 
-	of_id = of_match_device(xcan_of_match, &pdev->dev);
-	if (of_id && of_id->data)
-		devtype = of_id->data;
+	devtype = device_get_match_data(&pdev->dev);
 
 	hw_tx_max_property = devtype->flags & XCAN_FLAG_TX_MAILBOXES ?
 			     "tx-mailbox-count" : "tx-fifo-depth";
@@ -1799,6 +1799,16 @@ static int xcan_probe(struct platform_device *pdev)
 	priv->can.do_get_berr_counter = xcan_get_berr_counter;
 	priv->can.ctrlmode_supported = CAN_CTRLMODE_LOOPBACK |
 					CAN_CTRLMODE_BERR_REPORTING;
+	priv->rstc = devm_reset_control_get_optional_exclusive(&pdev->dev, NULL);
+	if (IS_ERR(priv->rstc)) {
+		dev_err(&pdev->dev, "Cannot get CAN reset.\n");
+		ret = PTR_ERR(priv->rstc);
+		goto err_free;
+	}
+
+	ret = reset_control_reset(priv->rstc);
+	if (ret)
+		goto err_free;
 
 	if (devtype->cantype == XAXI_CANFD) {
 		priv->can.data_bittiming_const =
@@ -1827,7 +1837,7 @@ static int xcan_probe(struct platform_device *pdev)
 	/* Get IRQ for the device */
 	ret = platform_get_irq(pdev, 0);
 	if (ret < 0)
-		goto err_free;
+		goto err_reset;
 
 	ndev->irq = ret;
 
@@ -1843,21 +1853,21 @@ static int xcan_probe(struct platform_device *pdev)
 	if (IS_ERR(priv->can_clk)) {
 		ret = dev_err_probe(&pdev->dev, PTR_ERR(priv->can_clk),
 				    "device clock not found\n");
-		goto err_free;
+		goto err_reset;
 	}
 
 	priv->bus_clk = devm_clk_get(&pdev->dev, devtype->bus_clk_name);
 	if (IS_ERR(priv->bus_clk)) {
 		ret = dev_err_probe(&pdev->dev, PTR_ERR(priv->bus_clk),
 				    "bus clock not found\n");
-		goto err_free;
+		goto err_reset;
 	}
 
 	transceiver = devm_phy_optional_get(&pdev->dev, NULL);
 	if (IS_ERR(transceiver)) {
 		ret = PTR_ERR(transceiver);
 		dev_err_probe(&pdev->dev, ret, "failed to get phy\n");
-		goto err_free;
+		goto err_reset;
 	}
 	priv->transceiver = transceiver;
 
@@ -1904,6 +1914,8 @@ static int xcan_probe(struct platform_device *pdev)
 err_disableclks:
 	pm_runtime_put(priv->dev);
 	pm_runtime_disable(&pdev->dev);
+err_reset:
+	reset_control_assert(priv->rstc);
 err_free:
 	free_candev(ndev);
 err:
@@ -1920,9 +1932,11 @@ err:
 static void xcan_remove(struct platform_device *pdev)
 {
 	struct net_device *ndev = platform_get_drvdata(pdev);
+	struct xcan_priv *priv = netdev_priv(ndev);
 
 	unregister_candev(ndev);
 	pm_runtime_disable(&pdev->dev);
+	reset_control_assert(priv->rstc);
 	free_candev(ndev);
 }
 

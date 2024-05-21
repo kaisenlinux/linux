@@ -414,6 +414,9 @@ static struct hns3_dbg_cap_info hns3_dbg_cap[] = {
 	}, {
 		.name = "support tm flush",
 		.cap_bit = HNAE3_DEV_SUPPORT_TM_FLUSH_B,
+	}, {
+		.name = "support vf fault detect",
+		.cap_bit = HNAE3_DEV_SUPPORT_VF_FAULT_B,
 	}
 };
 
@@ -500,11 +503,14 @@ static void hns3_get_coal_info(struct hns3_enet_tqp_vector *tqp_vector,
 	}
 
 	sprintf(result[j++], "%d", i);
-	sprintf(result[j++], "%s", dim_state_str[dim->state]);
+	sprintf(result[j++], "%s", dim->state < ARRAY_SIZE(dim_state_str) ?
+		dim_state_str[dim->state] : "unknown");
 	sprintf(result[j++], "%u", dim->profile_ix);
-	sprintf(result[j++], "%s", dim_cqe_mode_str[dim->mode]);
+	sprintf(result[j++], "%s", dim->mode < ARRAY_SIZE(dim_cqe_mode_str) ?
+		dim_cqe_mode_str[dim->mode] : "unknown");
 	sprintf(result[j++], "%s",
-		dim_tune_stat_str[dim->tune_state]);
+		dim->tune_state < ARRAY_SIZE(dim_tune_stat_str) ?
+		dim_tune_stat_str[dim->tune_state] : "unknown");
 	sprintf(result[j++], "%u", dim->steps_left);
 	sprintf(result[j++], "%u", dim->steps_right);
 	sprintf(result[j++], "%u", dim->tired);
@@ -1045,6 +1051,7 @@ hns3_dbg_dev_specs(struct hnae3_handle *h, char *buf, int len, int *pos)
 	struct hnae3_ae_dev *ae_dev = pci_get_drvdata(h->pdev);
 	struct hnae3_dev_specs *dev_specs = &ae_dev->dev_specs;
 	struct hnae3_knic_private_info *kinfo = &h->kinfo;
+	struct net_device *dev = kinfo->netdev;
 
 	*pos += scnprintf(buf + *pos, len - *pos, "dev_spec:\n");
 	*pos += scnprintf(buf + *pos, len - *pos, "MAC entry num: %u\n",
@@ -1087,6 +1094,9 @@ hns3_dbg_dev_specs(struct hnae3_handle *h, char *buf, int len, int *pos)
 			  dev_specs->mc_mac_size);
 	*pos += scnprintf(buf + *pos, len - *pos, "MAC statistics number: %u\n",
 			  dev_specs->mac_stats_num);
+	*pos += scnprintf(buf + *pos, len - *pos,
+			  "TX timeout threshold: %d seconds\n",
+			  dev->watchdog_timeo / HZ);
 }
 
 static int hns3_dbg_dev_info(struct hnae3_handle *h, char *buf, int len)

@@ -14,7 +14,6 @@ enum btrfs_rbio_ops {
 	BTRFS_RBIO_WRITE,
 	BTRFS_RBIO_READ_REBUILD,
 	BTRFS_RBIO_PARITY_SCRUB,
-	BTRFS_RBIO_REBUILD_MISSING,
 };
 
 struct btrfs_raid_bio {
@@ -165,7 +164,7 @@ struct raid56_bio_trace_info {
 	u8 stripe_nr;
 };
 
-static inline int nr_data_stripes(const struct map_lookup *map)
+static inline int nr_data_stripes(const struct btrfs_chunk_map *map)
 {
 	return map->num_stripes - btrfs_nr_parity_stripes(map->type);
 }

@@ -584,8 +584,7 @@ static int rbio_can_merge(struct btrfs_raid_bio *last,
 	if (last->operation == BTRFS_RBIO_PARITY_SCRUB)
 		return 0;
 
-	if (last->operation == BTRFS_RBIO_REBUILD_MISSING ||
-	    last->operation == BTRFS_RBIO_READ_REBUILD)
+	if (last->operation == BTRFS_RBIO_READ_REBUILD)
 		return 0;
 
 	return 1;
@@ -784,10 +783,7 @@ static noinline void unlock_stripe(struct btrfs_raid_bio *rbio)
 			spin_unlock(&rbio->bio_list_lock);
 			spin_unlock(&h->lock);
 
-			if (next->operation == BTRFS_RBIO_READ_REBUILD)
-				start_async_work(next, recover_rbio_work_locked);
-			else if (next->operation == BTRFS_RBIO_REBUILD_MISSING) {
-				steal_rbio(rbio, next);
+			if (next->operation == BTRFS_RBIO_READ_REBUILD) {
 				start_async_work(next, recover_rbio_work_locked);
 			} else if (next->operation == BTRFS_RBIO_WRITE) {
 				steal_rbio(rbio, next);
@@ -968,7 +964,7 @@ static int alloc_rbio_pages(struct btrfs_raid_bio *rbio)
 {
 	int ret;
 
-	ret = btrfs_alloc_page_array(rbio->nr_pages, rbio->stripe_pages);
+	ret = btrfs_alloc_page_array(rbio->nr_pages, rbio->stripe_pages, 0);
 	if (ret < 0)
 		return ret;
 	/* Mapping all sectors */
@@ -983,7 +979,7 @@ static int alloc_rbio_parity_pages(struct btrfs_raid_bio *rbio)
 	int ret;
 
 	ret = btrfs_alloc_page_array(rbio->nr_pages - data_pages,
-				     rbio->stripe_pages + data_pages);
+				     rbio->stripe_pages + data_pages, 0);
 	if (ret < 0)
 		return ret;
 
@@ -1517,11 +1513,11 @@ static void submit_read_wait_bio_list(struct btrfs_raid_bio *rbio,
 	while ((bio = bio_list_pop(bio_list))) {
 		bio->bi_end_io = raid_wait_read_end_io;
 
-		if (trace_raid56_scrub_read_recover_enabled()) {
+		if (trace_raid56_read_enabled()) {
 			struct raid56_bio_trace_info trace_info = { 0 };
 
 			bio_get_trace_info(rbio, bio, &trace_info);
-			trace_raid56_scrub_read_recover(rbio, bio, &trace_info);
+			trace_raid56_read(rbio, bio, &trace_info);
 		}
 		submit_bio(bio);
 	}
@@ -1534,7 +1530,7 @@ static int alloc_rbio_data_pages(struct btrfs_raid_bio *rbio)
 	const int data_pages = rbio->nr_data * rbio->stripe_npages;
 	int ret;
 
-	ret = btrfs_alloc_page_array(data_pages, rbio->stripe_pages);
+	ret = btrfs_alloc_page_array(data_pages, rbio->stripe_pages, 0);
 	if (ret < 0)
 		return ret;
 
@@ -1553,7 +1549,6 @@ struct btrfs_plug_cb {
 	struct blk_plug_cb cb;
 	struct btrfs_fs_info *info;
 	struct list_head rbio_list;
-	struct work_struct work;
 };
 
 /*
@@ -1698,8 +1693,7 @@ static int verify_one_sector(struct btrfs_raid_bio *rbio,
 	 * If we're rebuilding a read, we have to use pages from the
 	 * bio list if possible.
 	 */
-	if ((rbio->operation == BTRFS_RBIO_READ_REBUILD ||
-	     rbio->operation == BTRFS_RBIO_REBUILD_MISSING)) {
+	if (rbio->operation == BTRFS_RBIO_READ_REBUILD) {
 		sector = sector_in_rbio(rbio, stripe_nr, sector_nr, 0);
 	} else {
 		sector = rbio_stripe_sector(rbio, stripe_nr, sector_nr);
@@ -1763,8 +1757,7 @@ static int recover_vertical(struct btrfs_raid_bio *rbio, int sector_nr,
 		 * If we're rebuilding a read, we have to use pages from the
 		 * bio list if possible.
 		 */
-		if ((rbio->operation == BTRFS_RBIO_READ_REBUILD ||
-		     rbio->operation == BTRFS_RBIO_REBUILD_MISSING)) {
+		if (rbio->operation == BTRFS_RBIO_READ_REBUILD) {
 			sector = sector_in_rbio(rbio, stripe_nr, sector_nr, 0);
 		} else {
 			sector = rbio_stripe_sector(rbio, stripe_nr, sector_nr);
@@ -1897,8 +1890,7 @@ static int recover_sectors(struct btrfs_raid_bio *rbio)
 		goto out;
 	}
 
-	if (rbio->operation == BTRFS_RBIO_READ_REBUILD ||
-	    rbio->operation == BTRFS_RBIO_REBUILD_MISSING) {
+	if (rbio->operation == BTRFS_RBIO_READ_REBUILD) {
 		spin_lock(&rbio->bio_list_lock);
 		set_bit(RBIO_RMW_LOCKED_BIT, &rbio->flags);
 		spin_unlock(&rbio->bio_list_lock);
@@ -2198,11 +2190,11 @@ static void submit_write_bios(struct btrfs_raid_bio *rbio,
 	while ((bio = bio_list_pop(bio_list))) {
 		bio->bi_end_io = raid_wait_write_end_io;
 
-		if (trace_raid56_write_stripe_enabled()) {
+		if (trace_raid56_write_enabled()) {
 			struct raid56_bio_trace_info trace_info = { 0 };
 
 			bio_get_trace_info(rbio, bio, &trace_info);
-			trace_raid56_write_stripe(rbio, bio, &trace_info);
+			trace_raid56_write(rbio, bio, &trace_info);
 		}
 		submit_bio(bio);
 	}

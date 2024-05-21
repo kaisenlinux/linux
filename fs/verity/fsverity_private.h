@@ -100,6 +100,16 @@ fsverity_msg(const struct inode *inode, const char *level,
 #define fsverity_err(inode, fmt, ...)		\
 	fsverity_msg((inode), KERN_ERR, fmt, ##__VA_ARGS__)
 
+/* measure.c */
+
+#ifdef CONFIG_BPF_SYSCALL
+void __init fsverity_init_bpf(void);
+#else
+static inline void fsverity_init_bpf(void)
+{
+}
+#endif
+
 /* open.c */
 
 int fsverity_init_merkle_tree_params(struct merkle_tree_params *params,
@@ -118,16 +128,16 @@ void fsverity_free_info(struct fsverity_info *vi);
 int fsverity_get_descriptor(struct inode *inode,
 			    struct fsverity_descriptor **desc_ret);
 
-int __init fsverity_init_info_cache(void);
-void __init fsverity_exit_info_cache(void);
+void __init fsverity_init_info_cache(void);
 
 /* signature.c */
 
 #ifdef CONFIG_FS_VERITY_BUILTIN_SIGNATURES
+extern int fsverity_require_signatures;
 int fsverity_verify_signature(const struct fsverity_info *vi,
 			      const u8 *signature, size_t sig_size);
 
-int __init fsverity_init_signature(void);
+void __init fsverity_init_signature(void);
 #else /* !CONFIG_FS_VERITY_BUILTIN_SIGNATURES */
 static inline int
 fsverity_verify_signature(const struct fsverity_info *vi,
@@ -136,15 +146,13 @@ fsverity_verify_signature(const struct fsverity_info *vi,
 	return 0;
 }
 
-static inline int fsverity_init_signature(void)
+static inline void fsverity_init_signature(void)
 {
-	return 0;
 }
 #endif /* !CONFIG_FS_VERITY_BUILTIN_SIGNATURES */
 
 /* verify.c */
 
-int __init fsverity_init_workqueue(void);
-void __init fsverity_exit_workqueue(void);
+void __init fsverity_init_workqueue(void);
 
 #endif /* _FSVERITY_PRIVATE_H */

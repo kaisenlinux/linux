@@ -755,11 +755,11 @@ static struct dma_chan *rz_dmac_of_xlate(struct of_phandle_args *dma_spec,
 
 static int rz_dmac_chan_probe(struct rz_dmac *dmac,
 			      struct rz_dmac_chan *channel,
-			      unsigned int index)
+			      u8 index)
 {
 	struct platform_device *pdev = to_platform_device(dmac->dev);
 	struct rz_lmdesc *lmdesc;
-	char pdev_irqname[5];
+	char pdev_irqname[6];
 	char *irqname;
 	int ret;
 
@@ -767,7 +767,7 @@ static int rz_dmac_chan_probe(struct rz_dmac *dmac,
 	channel->mid_rid = -EINVAL;
 
 	/* Request the channel interrupt. */
-	sprintf(pdev_irqname, "ch%u", index);
+	scnprintf(pdev_irqname, sizeof(pdev_irqname), "ch%u", index);
 	channel->irq = platform_get_irq_byname(pdev, pdev_irqname);
 	if (channel->irq < 0)
 		return channel->irq;
@@ -845,9 +845,9 @@ static int rz_dmac_probe(struct platform_device *pdev)
 	struct dma_device *engine;
 	struct rz_dmac *dmac;
 	int channel_num;
-	unsigned int i;
 	int ret;
 	int irq;
+	u8 i;
 
 	dmac = devm_kzalloc(&pdev->dev, sizeof(*dmac), GFP_KERNEL);
 	if (!dmac)
@@ -950,7 +950,6 @@ static int rz_dmac_probe(struct platform_device *pdev)
 dma_register_err:
 	of_dma_controller_free(pdev->dev.of_node);
 err:
-	reset_control_assert(dmac->rstc);
 	channel_num = i ? i - 1 : 0;
 	for (i = 0; i < channel_num; i++) {
 		struct rz_dmac_chan *channel = &dmac->channels[i];
@@ -961,6 +960,7 @@ err:
 				  channel->lmdesc.base_dma);
 	}
 
+	reset_control_assert(dmac->rstc);
 err_pm_runtime_put:
 	pm_runtime_put(&pdev->dev);
 err_pm_disable:
@@ -969,11 +969,13 @@ err_pm_disable:
 	return ret;
 }
 
-static int rz_dmac_remove(struct platform_device *pdev)
+static void rz_dmac_remove(struct platform_device *pdev)
 {
 	struct rz_dmac *dmac = platform_get_drvdata(pdev);
 	unsigned int i;
 
+	dma_async_device_unregister(&dmac->engine);
+	of_dma_controller_free(pdev->dev.of_node);
 	for (i = 0; i < dmac->n_channels; i++) {
 		struct rz_dmac_chan *channel = &dmac->channels[i];
 
@@ -982,13 +984,9 @@ static int rz_dmac_remove(struct platform_device *pdev)
 				  channel->lmdesc.base,
 				  channel->lmdesc.base_dma);
 	}
-	of_dma_controller_free(pdev->dev.of_node);
-	dma_async_device_unregister(&dmac->engine);
 	reset_control_assert(dmac->rstc);
 	pm_runtime_put(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);
-
-	return 0;
 }
 
 static const struct of_device_id of_rz_dmac_match[] = {
@@ -1003,7 +1001,7 @@ static struct platform_driver rz_dmac_driver = {
 		.of_match_table = of_rz_dmac_match,
 	},
 	.probe		= rz_dmac_probe,
-	.remove		= rz_dmac_remove,
+	.remove_new	= rz_dmac_remove,
 };
 
 module_platform_driver(rz_dmac_driver);

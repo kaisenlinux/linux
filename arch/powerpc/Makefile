@@ -10,15 +10,26 @@
 # Rewritten by Cort Dougan and Paul Mackerras
 #
 
+ifdef cross_compiling
+  ifeq ($(CROSS_COMPILE),)
+    # Auto detect cross compiler prefix.
+    # Look for: (powerpc(64(le)?)?)(-unknown)?-linux(-gnu)?-
+    CC_ARCHES := powerpc powerpc64 powerpc64le
+    CC_SUFFIXES := linux linux-gnu unknown-linux-gnu
+    CROSS_COMPILE := $(call cc-cross-prefix, $(foreach a,$(CC_ARCHES), \
+                       $(foreach s,$(CC_SUFFIXES),$(a)-$(s)-)))
+  endif
+endif
+
 HAS_BIARCH	:= $(call cc-option-yn, -m32)
 
 # Set default 32 bits cross compilers for vdso and boot wrapper
 CROSS32_COMPILE ?=
 
 # If we're on a ppc/ppc64/ppc64le machine use that defconfig, otherwise just use
-# ppc64_defconfig because we have nothing better to go on.
+# ppc64le_defconfig because we have nothing better to go on.
 uname := $(shell uname -m)
-KBUILD_DEFCONFIG := $(if $(filter ppc%,$(uname)),$(uname),ppc64)_defconfig
+KBUILD_DEFCONFIG := $(if $(filter ppc%,$(uname)),$(uname),ppc64le)_defconfig
 
 new_nm := $(shell if $(NM) --help 2>&1 | grep -- '--synthetic' > /dev/null; then echo y; else echo n; fi)
 
@@ -143,22 +154,25 @@ CFLAGS-$(CONFIG_PPC32)	+= $(call cc-option, $(MULTIPLEWORD))
 CFLAGS-$(CONFIG_PPC32)	+= $(call cc-option,-mno-readonly-in-sdata)
 
 ifdef CONFIG_FUNCTION_TRACER
+ifdef CONFIG_ARCH_USING_PATCHABLE_FUNCTION_ENTRY
+KBUILD_CPPFLAGS	+= -DCC_USING_PATCHABLE_FUNCTION_ENTRY
+CC_FLAGS_FTRACE := -fpatchable-function-entry=2
+else
 CC_FLAGS_FTRACE := -pg
 ifdef CONFIG_MPROFILE_KERNEL
 CC_FLAGS_FTRACE += -mprofile-kernel
+endif
 endif
 endif
 
 CFLAGS-$(CONFIG_TARGET_CPU_BOOL) += -mcpu=$(CONFIG_TARGET_CPU)
 AFLAGS-$(CONFIG_TARGET_CPU_BOOL) += -mcpu=$(CONFIG_TARGET_CPU)
 
-CFLAGS-$(CONFIG_POWERPC64_CPU) += $(call cc-option,-mtune=power10,	\
-				  $(call cc-option,-mtune=power9,	\
-				  $(call cc-option,-mtune=power8)))
+CFLAGS-y += $(CONFIG_TUNE_CPU)
 
 asinstr := $(call as-instr,lis 9$(comma)foo@high,-DHAVE_AS_ATHIGH=1)
 
-KBUILD_CPPFLAGS	+= -I $(srctree)/arch/$(ARCH) $(asinstr)
+KBUILD_CPPFLAGS	+= -I $(srctree)/arch/powerpc $(asinstr)
 KBUILD_AFLAGS	+= $(AFLAGS-y)
 KBUILD_CFLAGS	+= $(call cc-option,-msoft-float)
 KBUILD_CFLAGS	+= $(CFLAGS-y)
@@ -229,7 +243,7 @@ BOOT_TARGETS2 := zImage% dtbImage% treeImage.% cuImage.% simpleImage.% uImage.%
 
 PHONY += $(BOOT_TARGETS1) $(BOOT_TARGETS2)
 
-boot := arch/$(ARCH)/boot
+boot := arch/powerpc/boot
 
 $(BOOT_TARGETS1): vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $(patsubst %,$(boot)/%,$@)
@@ -333,7 +347,7 @@ PHONY += $(generated_configs)
 
 define archhelp
   echo '* zImage          - Build default images selected by kernel config'
-  echo '  zImage.*        - Compressed kernel image (arch/$(ARCH)/boot/zImage.*)'
+  echo '  zImage.*        - Compressed kernel image (arch/powerpc/boot/zImage.*)'
   echo '  uImage          - U-Boot native image format'
   echo '  cuImage.<dt>    - Backwards compatible U-Boot image for older'
   echo '                    versions which do not support device trees'
@@ -344,12 +358,12 @@ define archhelp
   echo '                    (your) ~/bin/$(INSTALLKERNEL) or'
   echo '                    (distribution) /sbin/$(INSTALLKERNEL) or'
   echo '                    install to $$(INSTALL_PATH) and run lilo'
-  echo '  *_defconfig     - Select default config from arch/$(ARCH)/configs'
+  echo '  *_defconfig     - Select default config from arch/powerpc/configs'
   echo ''
   echo '  Targets with <dt> embed a device tree blob inside the image'
   echo '  These targets support board with firmware that does not'
   echo '  support passing a device tree directly.  Replace <dt> with the'
-  echo '  name of a dts file from the arch/$(ARCH)/boot/dts/ directory'
+  echo '  name of a dts file from the arch/powerpc/boot/dts/ directory'
   echo '  (minus the .dts extension).'
   echo
   $(foreach cfg,$(generated_configs),

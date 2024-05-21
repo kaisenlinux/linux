@@ -15,6 +15,7 @@
 #include <linux/net_tstamp.h>
 #include <linux/bitfield.h>
 #include <linux/hrtimer.h>
+#include <net/xdp.h>
 
 #include "igc_hw.h"
 
@@ -36,6 +37,8 @@ void igc_ethtool_set_ops(struct net_device *);
 #define IGC_N_SDP	4
 
 #define MAX_FLEX_FILTER			32
+
+#define IGC_MAX_TX_TSTAMP_REGS		4
 
 enum igc_mac_filter_type {
 	IGC_MAC_FILTER_TYPE_DST = 0,
@@ -67,6 +70,30 @@ struct igc_rx_packet_stats {
 	u64 sctp_packets;      /* SCTP headers processed */
 	u64 nfs_packets;       /* NFS headers processe */
 	u64 other_packets;
+};
+
+struct igc_tx_timestamp_request {
+	struct sk_buff *skb;   /* reference to the packet being timestamped */
+	unsigned long start;   /* when the tstamp request started (jiffies) */
+	u32 mask;              /* _TSYNCTXCTL_TXTT_{X} bit for this request */
+	u32 regl;              /* which TXSTMPL_{X} register should be used */
+	u32 regh;              /* which TXSTMPH_{X} register should be used */
+	u32 flags;             /* flags that should be added to the tx_buffer */
+};
+
+struct igc_inline_rx_tstamps {
+	/* Timestamps are saved in little endian at the beginning of the packet
+	 * buffer following the layout:
+	 *
+	 * DWORD: | 0              | 1              | 2              | 3              |
+	 * Field: | Timer1 SYSTIML | Timer1 SYSTIMH | Timer0 SYSTIML | Timer0 SYSTIMH |
+	 *
+	 * SYSTIML holds the nanoseconds part while SYSTIMH holds the seconds
+	 * part of the timestamp.
+	 *
+	 */
+	__le32 timer1[2];
+	__le32 timer0[2];
 };
 
 struct igc_ring_container {
@@ -244,12 +271,13 @@ struct igc_adapter {
 	 * ptp_tx_lock.
 	 */
 	spinlock_t ptp_tx_lock;
-	struct sk_buff *ptp_tx_skb;
+	struct igc_tx_timestamp_request tx_tstamp[IGC_MAX_TX_TSTAMP_REGS];
 	struct hwtstamp_config tstamp_config;
-	unsigned long ptp_tx_start;
 	unsigned int ptp_flags;
 	/* System time value lock */
 	spinlock_t tmreg_lock;
+	/* Free-running timer lock */
+	spinlock_t free_timer_lock;
 	struct cyclecounter cc;
 	struct timecounter tc;
 	struct timespec64 prev_ptp_time; /* Pre-reset PTP clock */
@@ -454,6 +482,12 @@ enum igc_tx_flags {
 	/* olinfo flags */
 	IGC_TX_FLAGS_IPV4	= 0x10,
 	IGC_TX_FLAGS_CSUM	= 0x20,
+
+	IGC_TX_FLAGS_TSTAMP_1	= 0x100,
+	IGC_TX_FLAGS_TSTAMP_2	= 0x200,
+	IGC_TX_FLAGS_TSTAMP_3	= 0x400,
+
+	IGC_TX_FLAGS_TSTAMP_TIMER_1 = 0x800,
 };
 
 enum igc_boards {
@@ -516,7 +550,7 @@ struct igc_rx_buffer {
 struct igc_xdp_buff {
 	struct xdp_buff xdp;
 	union igc_adv_rx_desc *rx_desc;
-	ktime_t rx_ts; /* data indication bit IGC_RXDADV_STAT_TSIP */
+	struct igc_inline_rx_tstamps *rx_ts; /* data indication bit IGC_RXDADV_STAT_TSIP */
 };
 
 struct igc_q_vector {
@@ -553,6 +587,7 @@ struct igc_nfc_filter {
 	u16 etype;
 	__be16 vlan_etype;
 	u16 vlan_tci;
+	u16 vlan_tci_mask;
 	u8 src_addr[ETH_ALEN];
 	u8 dst_addr[ETH_ALEN];
 	u8 user_data[8];
