@@ -619,6 +619,11 @@ static inline void *nft_set_priv(const struct nft_set *set)
 	return (void *)set->data;
 }
 
+static inline enum nft_data_types nft_set_datatype(const struct nft_set *set)
+{
+	return set->dtype == NFT_DATA_VERDICT ? NFT_DATA_VERDICT : NFT_DATA_VALUE;
+}
+
 static inline bool nft_set_gc_is_pending(const struct nft_set *s)
 {
 	return refcount_read(&s->refs) != 1;
@@ -1289,6 +1294,12 @@ struct nft_table {
 static inline bool nft_table_has_owner(const struct nft_table *table)
 {
 	return table->flags & NFT_TABLE_F_OWNER;
+}
+
+static inline bool nft_table_is_orphan(const struct nft_table *table)
+{
+	return (table->flags & (NFT_TABLE_F_OWNER | NFT_TABLE_F_PERSIST)) ==
+			NFT_TABLE_F_PERSIST;
 }
 
 static inline bool nft_base_chain_netdev(int family, u32 hooknum)

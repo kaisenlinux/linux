@@ -209,9 +209,10 @@
 #include "fifo.h"
 #include "nocow_locking_types.h"
 #include "opts.h"
-#include "recovery_types.h"
+#include "recovery_passes_types.h"
 #include "sb-errors_types.h"
 #include "seqmutex.h"
+#include "time_stats.h"
 #include "util.h"
 
 #ifdef CONFIG_BCACHEFS_DEBUG
@@ -264,6 +265,9 @@ do {									\
 #endif
 
 #define bch2_fmt(_c, fmt)		bch2_log_msg(_c, fmt "\n")
+
+__printf(2, 3)
+void bch2_print_opts(struct bch_opts *, const char *, ...);
 
 __printf(2, 3)
 void __bch2_print(struct bch_fs *c, const char *fmt, ...);
@@ -451,7 +455,9 @@ enum bch_time_stats {
 };
 
 #include "alloc_types.h"
+#include "btree_gc_types.h"
 #include "btree_types.h"
+#include "btree_node_scan_types.h"
 #include "btree_write_buffer_types.h"
 #include "buckets_types.h"
 #include "buckets_waiting_for_journal_types.h"
@@ -479,48 +485,6 @@ enum bch_time_stats {
 #define BTREE_NODE_OPEN_BUCKET_RESERVE	(BTREE_RESERVE_MAX * BCH_REPLICAS_MAX)
 
 struct btree;
-
-enum gc_phase {
-	GC_PHASE_NOT_RUNNING,
-	GC_PHASE_START,
-	GC_PHASE_SB,
-
-	GC_PHASE_BTREE_stripes,
-	GC_PHASE_BTREE_extents,
-	GC_PHASE_BTREE_inodes,
-	GC_PHASE_BTREE_dirents,
-	GC_PHASE_BTREE_xattrs,
-	GC_PHASE_BTREE_alloc,
-	GC_PHASE_BTREE_quotas,
-	GC_PHASE_BTREE_reflink,
-	GC_PHASE_BTREE_subvolumes,
-	GC_PHASE_BTREE_snapshots,
-	GC_PHASE_BTREE_lru,
-	GC_PHASE_BTREE_freespace,
-	GC_PHASE_BTREE_need_discard,
-	GC_PHASE_BTREE_backpointers,
-	GC_PHASE_BTREE_bucket_gens,
-	GC_PHASE_BTREE_snapshot_trees,
-	GC_PHASE_BTREE_deleted_inodes,
-	GC_PHASE_BTREE_logged_ops,
-	GC_PHASE_BTREE_rebalance_work,
-
-	GC_PHASE_PENDING_DELETE,
-};
-
-struct gc_pos {
-	enum gc_phase		phase;
-	struct bpos		pos;
-	unsigned		level;
-};
-
-struct reflink_gc {
-	u64		offset;
-	u32		size;
-	u32		refcount;
-};
-
-typedef GENRADIX(struct reflink_gc) reflink_gc_table;
 
 struct io_count {
 	u64			sectors[2][BCH_DATA_NR];
@@ -593,7 +557,7 @@ struct bch_dev {
 
 	/* The rest of this all shows up in sysfs */
 	atomic64_t		cur_latency[2];
-	struct bch2_time_stats	io_latency[2];
+	struct bch2_time_stats_quantiles io_latency[2];
 
 #define CONGESTED_MAX		1024
 	atomic_t		congested;
@@ -609,6 +573,7 @@ struct bch_dev {
  */
 
 #define BCH_FS_FLAGS()			\
+	x(new_fs)			\
 	x(started)			\
 	x(may_go_rw)			\
 	x(rw)				\
@@ -663,6 +628,8 @@ struct journal_seq_blacklist_table {
 };
 
 struct journal_keys {
+	/* must match layout in darray_types.h */
+	size_t			nr, size;
 	struct journal_key {
 		u64		journal_seq;
 		u32		journal_offset;
@@ -671,15 +638,13 @@ struct journal_keys {
 		bool		allocated;
 		bool		overwritten;
 		struct bkey_i	*k;
-	}			*d;
+	}			*data;
 	/*
 	 * Gap buffer: instead of all the empty space in the array being at the
 	 * end of the buffer - from @nr to @size - the empty space is at @gap.
 	 * This means that sequential insertions are O(n) instead of O(n^2).
 	 */
 	size_t			gap;
-	size_t			nr;
-	size_t			size;
 	atomic_t		ref;
 	bool			initial_ref_held;
 };
@@ -702,7 +667,10 @@ struct btree_trans_buf {
 	x(stripe_delete)						\
 	x(reflink)							\
 	x(fallocate)							\
+	x(fsync)							\
+	x(dio_write)							\
 	x(discard)							\
+	x(discard_fast)							\
 	x(invalidate)							\
 	x(delete_dead_snapshots)					\
 	x(snapshot_delete_pagecache)					\
@@ -790,6 +758,7 @@ struct bch_fs {
 		u64		features;
 		u64		compat;
 		unsigned long	errors_silent[BITS_TO_LONGS(BCH_SB_ERR_MAX)];
+		u64		btrees_lost_data;
 	}			sb;
 
 
@@ -804,7 +773,6 @@ struct bch_fs {
 
 	/* snapshot.c: */
 	struct snapshot_table __rcu *snapshots;
-	size_t			snapshot_table_size;
 	struct mutex		snapshot_table_lock;
 	struct rw_semaphore	snapshot_create_lock;
 
@@ -842,6 +810,8 @@ struct bch_fs {
 
 	struct workqueue_struct	*btree_interior_update_worker;
 	struct work_struct	btree_interior_update_work;
+
+	struct workqueue_struct	*btree_node_rewrite_worker;
 
 	struct list_head	pending_node_rewrites;
 	struct mutex		pending_node_rewrites_lock;
@@ -919,8 +889,6 @@ struct bch_fs {
 	/* ALLOCATOR */
 	spinlock_t		freelist_lock;
 	struct closure_waitlist	freelist_wait;
-	u64			blocked_allocate;
-	u64			blocked_allocate_open_bucket;
 
 	open_bucket_idx_t	open_buckets_freelist;
 	open_bucket_idx_t	open_buckets_nr_free;
@@ -940,8 +908,11 @@ struct bch_fs {
 	unsigned		write_points_nr;
 
 	struct buckets_waiting_for_journal buckets_waiting_for_journal;
-	struct work_struct	discard_work;
 	struct work_struct	invalidate_work;
+	struct work_struct	discard_work;
+	struct mutex		discard_buckets_in_flight_lock;
+	DARRAY(struct bpos)	discard_buckets_in_flight;
+	struct work_struct	discard_fast_work;
 
 	/* GARBAGE COLLECTION */
 	struct task_struct	*gc_thread;
@@ -1094,6 +1065,8 @@ struct bch_fs {
 	u64			journal_entries_base_seq;
 	struct journal_keys	journal_keys;
 	struct list_head	journal_iters;
+
+	struct find_btree_nodes	found_btree_nodes;
 
 	u64			last_bucket_seq_cleanup;
 

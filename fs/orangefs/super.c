@@ -201,7 +201,8 @@ static int orangefs_statfs(struct dentry *dentry, struct kstatfs *buf)
 		     (long)new_op->downcall.resp.statfs.files_avail);
 
 	buf->f_type = sb->s_magic;
-	memcpy(&buf->f_fsid, &ORANGEFS_SB(sb)->fs_id, sizeof(buf->f_fsid));
+	buf->f_fsid.val[0] = ORANGEFS_SB(sb)->fs_id;
+	buf->f_fsid.val[1] = ORANGEFS_SB(sb)->id;
 	buf->f_bsize = new_op->downcall.resp.statfs.block_size;
 	buf->f_namelen = ORANGEFS_NAME_MAX;
 
@@ -644,7 +645,7 @@ int orangefs_inode_cache_initialize(void)
 					"orangefs_inode_cache",
 					sizeof(struct orangefs_inode_s),
 					0,
-					ORANGEFS_CACHE_CREATE_FLAGS,
+					0,
 					offsetof(struct orangefs_inode_s,
 						link_target),
 					sizeof_field(struct orangefs_inode_s,

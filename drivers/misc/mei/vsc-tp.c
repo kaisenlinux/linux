@@ -336,7 +336,7 @@ int vsc_tp_rom_xfer(struct vsc_tp *tp, const void *obuf, void *ibuf, size_t len)
 		return ret;
 
 	if (ibuf)
-		cpu_to_be32_array(ibuf, tp->rx_buf, words);
+		be32_to_cpu_array(ibuf, tp->rx_buf, words);
 
 	return ret;
 }
@@ -476,11 +476,16 @@ static int vsc_tp_match_any(struct acpi_device *adev, void *data)
 
 static int vsc_tp_probe(struct spi_device *spi)
 {
-	struct platform_device_info pinfo = { 0 };
+	struct vsc_tp *tp;
+	struct platform_device_info pinfo = {
+		.name = "intel_vsc",
+		.data = &tp,
+		.size_data = sizeof(tp),
+		.id = PLATFORM_DEVID_NONE,
+	};
 	struct device *dev = &spi->dev;
 	struct platform_device *pdev;
 	struct acpi_device *adev;
-	struct vsc_tp *tp;
 	int ret;
 
 	tp = devm_kzalloc(dev, sizeof(*tp), GFP_KERNEL);
@@ -531,13 +536,8 @@ static int vsc_tp_probe(struct spi_device *spi)
 		ret = -ENODEV;
 		goto err_destroy_lock;
 	}
+
 	pinfo.fwnode = acpi_fwnode_handle(adev);
-
-	pinfo.name = "intel_vsc";
-	pinfo.data = &tp;
-	pinfo.size_data = sizeof(tp);
-	pinfo.id = PLATFORM_DEVID_NONE;
-
 	pdev = platform_device_register_full(&pinfo);
 	if (IS_ERR(pdev)) {
 		ret = PTR_ERR(pdev);
@@ -568,6 +568,19 @@ static void vsc_tp_remove(struct spi_device *spi)
 	free_irq(spi->irq, tp);
 }
 
+static void vsc_tp_shutdown(struct spi_device *spi)
+{
+	struct vsc_tp *tp = spi_get_drvdata(spi);
+
+	platform_device_unregister(tp->pdev);
+
+	mutex_destroy(&tp->mutex);
+
+	vsc_tp_reset(tp);
+
+	free_irq(spi->irq, tp);
+}
+
 static const struct acpi_device_id vsc_tp_acpi_ids[] = {
 	{ "INTC1009" }, /* Raptor Lake */
 	{ "INTC1058" }, /* Tiger Lake */
@@ -580,6 +593,7 @@ MODULE_DEVICE_TABLE(acpi, vsc_tp_acpi_ids);
 static struct spi_driver vsc_tp_driver = {
 	.probe = vsc_tp_probe,
 	.remove = vsc_tp_remove,
+	.shutdown = vsc_tp_shutdown,
 	.driver = {
 		.name = "vsc-tp",
 		.acpi_match_table = vsc_tp_acpi_ids,
