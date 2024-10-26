@@ -1159,7 +1159,7 @@ done:
 }
 
 static int iso_sock_accept(struct socket *sock, struct socket *newsock,
-			   int flags, bool kern)
+			   struct proto_accept_arg *arg)
 {
 	DEFINE_WAIT_FUNC(wait, woken_wake_function);
 	struct sock *sk = sock->sk, *ch;
@@ -1168,7 +1168,7 @@ static int iso_sock_accept(struct socket *sock, struct socket *newsock,
 
 	lock_sock(sk);
 
-	timeo = sock_rcvtimeo(sk, flags & O_NONBLOCK);
+	timeo = sock_rcvtimeo(sk, arg->flags & O_NONBLOCK);
 
 	BT_DBG("sk %p timeo %ld", sk, timeo);
 
@@ -1719,11 +1719,6 @@ static void iso_sock_ready(struct sock *sk)
 	sk->sk_state_change(sk);
 	release_sock(sk);
 }
-
-struct iso_list_data {
-	struct hci_conn *hcon;
-	int count;
-};
 
 static bool iso_match_big(struct sock *sk, void *data)
 {

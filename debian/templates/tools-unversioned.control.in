@@ -21,6 +21,8 @@ Architecture: linux-any
 Build-Depends:
   libcap-dev,
   libpci-dev,
+  libnl-3-dev,
+  libnl-genl-3-dev,
 Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: CPU power management tools for Linux
  The cpupower command allows inspection and control of cpufreq and
@@ -66,6 +68,7 @@ Build-Depends:
  gcc-multilib [amd64 mips64 mips64el mips64r6 mips64r6el ppc64 s390x sparc64] <!cross>,
  libaudit-dev,
  libbabeltrace-dev,
+ libdebuginfod-dev,
  libdw-dev,
  libnewt-dev,
  libnuma-dev,
@@ -127,10 +130,7 @@ Depends: ${shlibs:Depends}, ${misc:Depends}
 Section: admin
 Description: Support daemons for Linux running on Hyper-V
  Suite of daemons for Linux guests running on Hyper-V, consisting of
- hv_fcopy_daemon, hv_kvp_daemon and hv_vss_daemon.
- .
- hv_fcopy_daemon provides the file copy service, allowing the host to
- copy files into the guest.
+ hv_kvp_daemon and hv_vss_daemon.
  .
  hv_kvp_daemon provides the key-value pair (KVP) service, allowing the
  host to get and set the IP networking configuration of the guest.
@@ -151,3 +151,17 @@ Description: Real-Time Linux Analysis tools
  properties of Linux.  rtla uses kernel tracing capabilities to
  provide precise information about the properties and root causes of
  unexpected results.
+
+Package: intel-sdsi
+Meta-Rules-Target: sdsi
+Build-Profiles: <!pkg.linux.notools !pkg.linux.mintools>
+Architecture: amd64
+Depends: ${shlibs:Depends}
+Section: admin
+Description: Intel On Demand (SDSi) provisioning tool
+ intel_sdsi is a tool for key certificate and activation payload
+ provisioning on Intel Xeon family processors with support for Intel
+ On Demand (formerly known as Software Defined Silicon or SDSi).
+ .
+ intel_sdsi allows the configuration of additional CPU features through
+ a license activation process.

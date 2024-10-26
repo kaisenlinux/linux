@@ -453,14 +453,14 @@ int thread__memcpy(struct thread *thread, struct machine *machine,
 
 	dso = map__dso(al.map);
 
-	if (!dso || dso->data.status == DSO_DATA_STATUS_ERROR || map__load(al.map) < 0) {
+	if (!dso || dso__data(dso)->status == DSO_DATA_STATUS_ERROR || map__load(al.map) < 0) {
 		addr_location__exit(&al);
 		return -1;
 	}
 
 	offset = map__map_ip(al.map, ip);
 	if (is64bit)
-		*is64bit = dso->is_64_bit;
+		*is64bit = dso__is_64_bit(dso);
 
 	addr_location__exit(&al);
 
@@ -476,6 +476,7 @@ void thread__free_stitch_list(struct thread *thread)
 		return;
 
 	list_for_each_entry_safe(pos, tmp, &lbr_stitch->lists, node) {
+		map_symbol__exit(&pos->cursor.ms);
 		list_del_init(&pos->node);
 		free(pos);
 	}
@@ -484,6 +485,9 @@ void thread__free_stitch_list(struct thread *thread)
 		list_del_init(&pos->node);
 		free(pos);
 	}
+
+	for (unsigned int i = 0 ; i < lbr_stitch->prev_lbr_cursor_size; i++)
+		map_symbol__exit(&lbr_stitch->prev_lbr_cursor[i].ms);
 
 	zfree(&lbr_stitch->prev_lbr_cursor);
 	free(thread__lbr_stitch(thread));

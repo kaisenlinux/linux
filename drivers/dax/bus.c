@@ -39,12 +39,9 @@ static int dax_bus_uevent(const struct device *dev, struct kobj_uevent_env *env)
 	return add_uevent_var(env, "MODALIAS=" DAX_DEVICE_MODALIAS_FMT, 0);
 }
 
-static struct dax_device_driver *to_dax_drv(struct device_driver *drv)
-{
-	return container_of(drv, struct dax_device_driver, drv);
-}
+#define to_dax_drv(__drv)	container_of_const(__drv, struct dax_device_driver, drv)
 
-static struct dax_id *__dax_match_id(struct dax_device_driver *dax_drv,
+static struct dax_id *__dax_match_id(const struct dax_device_driver *dax_drv,
 		const char *dev_name)
 {
 	struct dax_id *dax_id;
@@ -57,7 +54,7 @@ static struct dax_id *__dax_match_id(struct dax_device_driver *dax_drv,
 	return NULL;
 }
 
-static int dax_match_id(struct dax_device_driver *dax_drv, struct device *dev)
+static int dax_match_id(const struct dax_device_driver *dax_drv, struct device *dev)
 {
 	int match;
 
@@ -68,7 +65,7 @@ static int dax_match_id(struct dax_device_driver *dax_drv, struct device *dev)
 	return match;
 }
 
-static int dax_match_type(struct dax_device_driver *dax_drv, struct device *dev)
+static int dax_match_type(const struct dax_device_driver *dax_drv, struct device *dev)
 {
 	enum dax_driver_type type = DAXDRV_DEVICE_TYPE;
 	struct dev_dax *dev_dax = to_dev_dax(dev);
@@ -156,7 +153,7 @@ static struct attribute *dax_drv_attrs[] = {
 };
 ATTRIBUTE_GROUPS(dax_drv);
 
-static int dax_bus_match(struct device *dev, struct device_driver *drv);
+static int dax_bus_match(struct device *dev, const struct device_driver *drv);
 
 /*
  * Static dax regions are regions created by an external subsystem
@@ -250,9 +247,9 @@ static const struct bus_type dax_bus_type = {
 	.drv_groups = dax_drv_groups,
 };
 
-static int dax_bus_match(struct device *dev, struct device_driver *drv)
+static int dax_bus_match(struct device *dev, const struct device_driver *drv)
 {
-	struct dax_device_driver *dax_drv = to_dax_drv(drv);
+	const struct dax_device_driver *dax_drv = to_dax_drv(drv);
 
 	if (dax_match_id(dax_drv, dev))
 		return 1;
@@ -792,7 +789,7 @@ static const struct attribute_group *dax_mapping_attribute_groups[] = {
 	NULL,
 };
 
-static struct device_type dax_mapping_type = {
+static const struct device_type dax_mapping_type = {
 	.release = dax_mapping_release,
 	.groups = dax_mapping_attribute_groups,
 };
@@ -1178,7 +1175,6 @@ static ssize_t mapping_store(struct device *dev, struct device_attribute *attr,
 	if (rc)
 		return rc;
 
-	rc = -ENXIO;
 	rc = down_write_killable(&dax_region_rwsem);
 	if (rc)
 		return rc;

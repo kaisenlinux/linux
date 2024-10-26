@@ -52,10 +52,8 @@ int x86_android_tablet_get_gpiod(const char *chip, int pin, const char *con_id,
 		return -ENOMEM;
 
 	lookup->dev_id = KBUILD_MODNAME;
-	lookup->table[0].key = chip;
-	lookup->table[0].chip_hwnum = pin;
-	lookup->table[0].con_id = con_id;
-	lookup->table[0].flags = active_low ? GPIO_ACTIVE_LOW : GPIO_ACTIVE_HIGH;
+	lookup->table[0] =
+		GPIO_LOOKUP(chip, pin, con_id, active_low ? GPIO_ACTIVE_LOW : GPIO_ACTIVE_HIGH);
 
 	gpiod_add_lookup_table(lookup);
 	gpiod = devm_gpiod_get(&x86_android_tablet_device->dev, con_id, dflags);
@@ -343,7 +341,7 @@ static __init int x86_android_tablet_probe(struct platform_device *pdev)
 		gpiod_add_lookup_table(gpiod_lookup_tables[i]);
 
 	if (dev_info->init) {
-		ret = dev_info->init();
+		ret = dev_info->init(&pdev->dev);
 		if (ret < 0) {
 			x86_android_tablet_remove(pdev);
 			return ret;
@@ -392,8 +390,9 @@ static __init int x86_android_tablet_probe(struct platform_device *pdev)
 	for (i = 0; i < pdev_count; i++) {
 		pdevs[i] = platform_device_register_full(&dev_info->pdev_info[i]);
 		if (IS_ERR(pdevs[i])) {
+			ret = PTR_ERR(pdevs[i]);
 			x86_android_tablet_remove(pdev);
-			return PTR_ERR(pdevs[i]);
+			return ret;
 		}
 	}
 
@@ -445,8 +444,9 @@ static __init int x86_android_tablet_probe(struct platform_device *pdev)
 								  PLATFORM_DEVID_AUTO,
 								  &pdata, sizeof(pdata));
 		if (IS_ERR(pdevs[pdev_count])) {
+			ret = PTR_ERR(pdevs[pdev_count]);
 			x86_android_tablet_remove(pdev);
-			return PTR_ERR(pdevs[pdev_count]);
+			return ret;
 		}
 		pdev_count++;
 	}

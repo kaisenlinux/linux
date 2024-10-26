@@ -228,7 +228,7 @@ struct request_sock;
 #define LSM_UNSAFE_NO_NEW_PRIVS	4
 
 #ifdef CONFIG_MMU
-extern int mmap_min_addr_handler(struct ctl_table *table, int write,
+extern int mmap_min_addr_handler(const struct ctl_table *table, int write,
 				 void *buffer, size_t *lenp, loff_t *ppos);
 #endif
 
@@ -398,7 +398,7 @@ int security_inode_setsecurity(struct inode *inode, const char *name, const void
 int security_inode_listsecurity(struct inode *inode, char *buffer, size_t buffer_size);
 void security_inode_getsecid(struct inode *inode, u32 *secid);
 int security_inode_copy_up(struct dentry *src, struct cred **new);
-int security_inode_copy_up_xattr(const char *name);
+int security_inode_copy_up_xattr(struct dentry *src, const char *name);
 int security_kernfs_init_security(struct kernfs_node *kn_dir,
 				  struct kernfs_node *kn);
 int security_file_permission(struct file *file, int mask);
@@ -1016,7 +1016,7 @@ static inline int security_kernfs_init_security(struct kernfs_node *kn_dir,
 	return 0;
 }
 
-static inline int security_inode_copy_up_xattr(const char *name)
+static inline int security_inode_copy_up_xattr(struct dentry *src, const char *name)
 {
 	return -EOPNOTSUPP;
 }

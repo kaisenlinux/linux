@@ -78,7 +78,7 @@ comma (",").
     │ │ │ │ │ │ │ │ ...
     │ │ │ │ │ │ ...
     │ │ │ │ │ :ref:`schemes <sysfs_schemes>`/nr_schemes
-    │ │ │ │ │ │ :ref:`0 <sysfs_scheme>`/action,apply_interval_us
+    │ │ │ │ │ │ :ref:`0 <sysfs_scheme>`/action,target_nid,apply_interval_us
     │ │ │ │ │ │ │ :ref:`access_pattern <sysfs_access_pattern>`/
     │ │ │ │ │ │ │ │ sz/min,max
     │ │ │ │ │ │ │ │ nr_accesses/min,max
@@ -289,13 +289,17 @@ schemes/<N>/
 ------------
 
 In each scheme directory, five directories (``access_pattern``, ``quotas``,
-``watermarks``, ``filters``, ``stats``, and ``tried_regions``) and two files
-(``action`` and ``apply_interval``) exist.
+``watermarks``, ``filters``, ``stats``, and ``tried_regions``) and three files
+(``action``, ``target_nid`` and ``apply_interval``) exist.
 
 The ``action`` file is for setting and getting the scheme's :ref:`action
 <damon_design_damos_action>`.  The keywords that can be written to and read
 from the file and their meaning are same to those of the list on
 :ref:`design doc <damon_design_damos_action>`.
+
+The ``target_nid`` file is for setting the migration target node, which is
+only meaningful when the ``action`` is either ``migrate_hot`` or
+``migrate_cold``.
 
 The ``apply_interval_us`` file is for setting and getting the scheme's
 :ref:`apply_interval <damon_design_damos>` in microseconds.
@@ -410,19 +414,19 @@ in the numeric order.
 
 Each filter directory contains six files, namely ``type``, ``matcing``,
 ``memcg_path``, ``addr_start``, ``addr_end``, and ``target_idx``.  To ``type``
-file, you can write one of four special keywords: ``anon`` for anonymous pages,
-``memcg`` for specific memory cgroup, ``addr`` for specific address range (an
-open-ended interval), or ``target`` for specific DAMON monitoring target
-filtering.  In case of the memory cgroup filtering, you can specify the memory
-cgroup of the interest by writing the path of the memory cgroup from the
-cgroups mount point to ``memcg_path`` file.  In case of the address range
-filtering, you can specify the start and end address of the range to
-``addr_start`` and ``addr_end`` files, respectively.  For the DAMON monitoring
-target filtering, you can specify the index of the target between the list of
-the DAMON context's monitoring targets list to ``target_idx`` file.  You can
-write ``Y`` or ``N`` to ``matching`` file to filter out pages that does or does
-not match to the type, respectively.  Then, the scheme's action will not be
-applied to the pages that specified to be filtered out.
+file, you can write one of five special keywords: ``anon`` for anonymous pages,
+``memcg`` for specific memory cgroup, ``young`` for young pages, ``addr`` for
+specific address range (an open-ended interval), or ``target`` for specific
+DAMON monitoring target filtering.  In case of the memory cgroup filtering, you
+can specify the memory cgroup of the interest by writing the path of the memory
+cgroup from the cgroups mount point to ``memcg_path`` file.  In case of the
+address range filtering, you can specify the start and end address of the range
+to ``addr_start`` and ``addr_end`` files, respectively.  For the DAMON
+monitoring target filtering, you can specify the index of the target between
+the list of the DAMON context's monitoring targets list to ``target_idx`` file.
+You can write ``Y`` or ``N`` to ``matching`` file to filter out pages that does
+or does not match to the type, respectively.  Then, the scheme's action will
+not be applied to the pages that specified to be filtered out.
 
 For example, below restricts a DAMOS action to be applied to only non-anonymous
 pages of all memory cgroups except ``/having_care_already``.::

@@ -351,10 +351,8 @@ void __init platform_init(void)
 	arch_reserve_vmcore();
 	arch_reserve_crashkernel();
 
-#ifdef CONFIG_ACPI_TABLE_UPGRADE
-	acpi_table_upgrade();
-#endif
 #ifdef CONFIG_ACPI
+	acpi_table_upgrade();
 	acpi_gbl_use_default_register_widths = false;
 	acpi_boot_table_init();
 #endif
@@ -578,8 +576,10 @@ static void __init prefill_possible_map(void)
 
 	for (i = 0; i < possible; i++)
 		set_cpu_possible(i, true);
-	for (; i < NR_CPUS; i++)
+	for (; i < NR_CPUS; i++) {
+		set_cpu_present(i, false);
 		set_cpu_possible(i, false);
+	}
 
 	set_nr_cpu_ids(possible);
 }

@@ -541,7 +541,7 @@ same_owner_str(struct nfs4_stateowner *sop, struct xdr_netobj *owner)
 }
 
 static struct nfs4_openowner *
-find_openstateowner_str_locked(unsigned int hashval, struct nfsd4_open *open,
+find_openstateowner_str(unsigned int hashval, struct nfsd4_open *open,
 			struct nfs4_client *clp)
 {
 	struct nfs4_stateowner *so;
@@ -556,18 +556,6 @@ find_openstateowner_str_locked(unsigned int hashval, struct nfsd4_open *open,
 			return openowner(nfs4_get_stateowner(so));
 	}
 	return NULL;
-}
-
-static struct nfs4_openowner *
-find_openstateowner_str(unsigned int hashval, struct nfsd4_open *open,
-			struct nfs4_client *clp)
-{
-	struct nfs4_openowner *oo;
-
-	spin_lock(&clp->cl_lock);
-	oo = find_openstateowner_str_locked(hashval, open, clp);
-	spin_unlock(&clp->cl_lock);
-	return oo;
 }
 
 static inline u32
@@ -1089,7 +1077,8 @@ static void nfs4_free_deleg(struct nfs4_stid *stid)
  * When a delegation is recalled, the filehandle is stored in the "new"
  * filter.
  * Every 30 seconds we swap the filters and clear the "new" one,
- * unless both are empty of course.
+ * unless both are empty of course.  This results in delegations for a
+ * given filehandle being blocked for between 30 and 60 seconds.
  *
  * Each filter is 256 bits.  We hash the filehandle to 32bit and use the
  * low 3 bytes as hash-table indices.
@@ -1118,9 +1107,9 @@ static int delegation_blocked(struct knfsd_fh *fh)
 		if (ktime_get_seconds() - bd->swap_time > 30) {
 			bd->entries -= bd->old_entries;
 			bd->old_entries = bd->entries;
+			bd->new = 1-bd->new;
 			memset(bd->set[bd->new], 0,
 			       sizeof(bd->set[0]));
-			bd->new = 1-bd->new;
 			bd->swap_time = ktime_get_seconds();
 		}
 		spin_unlock(&blocked_delegations_lock);
@@ -1409,11 +1398,16 @@ static void
 recalculate_deny_mode(struct nfs4_file *fp)
 {
 	struct nfs4_ol_stateid *stp;
+	u32 old_deny;
 
 	spin_lock(&fp->fi_lock);
+	old_deny = fp->fi_share_deny;
 	fp->fi_share_deny = 0;
-	list_for_each_entry(stp, &fp->fi_stateids, st_perfile)
+	list_for_each_entry(stp, &fp->fi_stateids, st_perfile) {
 		fp->fi_share_deny |= bmap_to_share_mode(stp->st_deny_bmap);
+		if (fp->fi_share_deny == old_deny)
+			break;
+	}
 	spin_unlock(&fp->fi_lock);
 }
 
@@ -2245,6 +2239,10 @@ static struct nfs4_client *alloc_client(struct xdr_netobj name,
 						 GFP_KERNEL);
 	if (!clp->cl_ownerstr_hashtbl)
 		goto err_no_hashtbl;
+	clp->cl_callback_wq = alloc_ordered_workqueue("nfsd4_callbacks", 0);
+	if (!clp->cl_callback_wq)
+		goto err_no_callback_wq;
+
 	for (i = 0; i < OWNER_HASH_SIZE; i++)
 		INIT_LIST_HEAD(&clp->cl_ownerstr_hashtbl[i]);
 	INIT_LIST_HEAD(&clp->cl_sessions);
@@ -2267,6 +2265,8 @@ static struct nfs4_client *alloc_client(struct xdr_netobj name,
 	spin_lock_init(&clp->cl_lock);
 	rpc_init_wait_queue(&clp->cl_cb_waitq, "Backchannel slot table");
 	return clp;
+err_no_callback_wq:
+	kfree(clp->cl_ownerstr_hashtbl);
 err_no_hashtbl:
 	kfree(clp->cl_name.data);
 err_no_name:
@@ -2280,6 +2280,7 @@ static void __free_client(struct kref *k)
 	struct nfs4_client *clp = container_of(c, struct nfs4_client, cl_nfsdfs);
 
 	free_svc_cred(&clp->cl_cred);
+	destroy_workqueue(clp->cl_callback_wq);
 	kfree(clp->cl_ownerstr_hashtbl);
 	kfree(clp->cl_name.data);
 	kfree(clp->cl_nii_domain.data);
@@ -2352,7 +2353,11 @@ unhash_client(struct nfs4_client *clp)
 
 static __be32 mark_client_expired_locked(struct nfs4_client *clp)
 {
-	if (atomic_read(&clp->cl_rpc_users))
+	int users = atomic_read(&clp->cl_rpc_users);
+
+	trace_nfsd_mark_client_expired(clp, users);
+
+	if (users)
 		return nfserr_jukebox;
 	unhash_client_locked(clp);
 	return nfs_ok;
@@ -2785,15 +2790,18 @@ static int nfs4_show_open(struct seq_file *s, struct nfs4_stid *st)
 		deny & NFS4_SHARE_ACCESS_READ ? "r" : "-",
 		deny & NFS4_SHARE_ACCESS_WRITE ? "w" : "-");
 
-	spin_lock(&nf->fi_lock);
-	file = find_any_file_locked(nf);
-	if (file) {
-		nfs4_show_superblock(s, file);
-		seq_puts(s, ", ");
-		nfs4_show_fname(s, file);
-		seq_puts(s, ", ");
-	}
-	spin_unlock(&nf->fi_lock);
+	if (nf) {
+		spin_lock(&nf->fi_lock);
+		file = find_any_file_locked(nf);
+		if (file) {
+			nfs4_show_superblock(s, file);
+			seq_puts(s, ", ");
+			nfs4_show_fname(s, file);
+			seq_puts(s, ", ");
+		}
+		spin_unlock(&nf->fi_lock);
+	} else
+		seq_puts(s, "closed, ");
 	nfs4_show_owner(s, oo);
 	if (st->sc_status & SC_STATUS_ADMIN_REVOKED)
 		seq_puts(s, ", admin-revoked");
@@ -3071,9 +3079,9 @@ nfsd4_cb_getattr_release(struct nfsd4_callback *cb)
 	struct nfs4_delegation *dp =
 			container_of(ncf, struct nfs4_delegation, dl_cb_fattr);
 
-	nfs4_put_stid(&dp->dl_stid);
 	clear_bit(CB_GETATTR_BUSY, &ncf->ncf_cb_flags);
 	wake_up_bit(&ncf->ncf_cb_flags, CB_GETATTR_BUSY);
+	nfs4_put_stid(&dp->dl_stid);
 }
 
 static const struct nfsd4_callback_ops nfsd4_cb_recall_any_ops = {
@@ -3641,12 +3649,8 @@ out_nolock:
 	return status;
 }
 
-static __be32
-check_slot_seqid(u32 seqid, u32 slot_seqid, int slot_inuse)
+static __be32 check_slot_seqid(u32 seqid, u32 slot_seqid, bool slot_inuse)
 {
-	dprintk("%s enter. seqid %d slot_seqid %d\n", __func__, seqid,
-		slot_seqid);
-
 	/* The slot is in use, and no response has been sent. */
 	if (slot_inuse) {
 		if (seqid == slot_seqid)
@@ -3823,10 +3827,13 @@ nfsd4_create_session(struct svc_rqst *rqstp,
 	}
 
 	/* RFC 8881 Section 18.36.4 Phase 2: Sequence ID processing. */
-	if (conf)
+	if (conf) {
 		cs_slot = &conf->cl_cs_slot;
-	else
+		trace_nfsd_slot_seqid_conf(conf, cr_ses);
+	} else {
 		cs_slot = &unconf->cl_cs_slot;
+		trace_nfsd_slot_seqid_unconf(unconf, cr_ses);
+	}
 	status = check_slot_seqid(cr_ses->seqid, cs_slot->sl_seqid, 0);
 	switch (status) {
 	case nfs_ok:
@@ -4221,6 +4228,7 @@ nfsd4_sequence(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 	 * sr_highest_slotid and the sr_target_slot id to maxslots */
 	seq->maxslots = session->se_fchannel.maxreqs;
 
+	trace_nfsd_slot_seqid_sequence(clp, seq, slot);
 	status = check_slot_seqid(seq->seqid, slot->sl_seqid,
 					slot->sl_flags & NFSD4_SLOT_INUSE);
 	if (status == nfserr_replay_cache) {
@@ -4662,21 +4670,32 @@ nfsd4_init_leases_net(struct nfsd_net *nn)
 	atomic_set(&nn->nfsd_courtesy_clients, 0);
 }
 
+enum rp_lock {
+	RP_UNLOCKED,
+	RP_LOCKED,
+	RP_UNHASHED,
+};
+
 static void init_nfs4_replay(struct nfs4_replay *rp)
 {
 	rp->rp_status = nfserr_serverfault;
 	rp->rp_buflen = 0;
 	rp->rp_buf = rp->rp_ibuf;
-	mutex_init(&rp->rp_mutex);
+	atomic_set(&rp->rp_locked, RP_UNLOCKED);
 }
 
-static void nfsd4_cstate_assign_replay(struct nfsd4_compound_state *cstate,
-		struct nfs4_stateowner *so)
+static int nfsd4_cstate_assign_replay(struct nfsd4_compound_state *cstate,
+				      struct nfs4_stateowner *so)
 {
 	if (!nfsd4_has_session(cstate)) {
-		mutex_lock(&so->so_replay.rp_mutex);
+		wait_var_event(&so->so_replay.rp_locked,
+			       atomic_cmpxchg(&so->so_replay.rp_locked,
+					      RP_UNLOCKED, RP_LOCKED) != RP_LOCKED);
+		if (atomic_read(&so->so_replay.rp_locked) == RP_UNHASHED)
+			return -EAGAIN;
 		cstate->replay_owner = nfs4_get_stateowner(so);
 	}
+	return 0;
 }
 
 void nfsd4_cstate_clear_replay(struct nfsd4_compound_state *cstate)
@@ -4685,7 +4704,8 @@ void nfsd4_cstate_clear_replay(struct nfsd4_compound_state *cstate)
 
 	if (so != NULL) {
 		cstate->replay_owner = NULL;
-		mutex_unlock(&so->so_replay.rp_mutex);
+		atomic_set(&so->so_replay.rp_locked, RP_UNLOCKED);
+		wake_up_var(&so->so_replay.rp_locked);
 		nfs4_put_stateowner(so);
 	}
 }
@@ -4866,34 +4886,46 @@ nfsd4_find_and_lock_existing_open(struct nfs4_file *fp, struct nfsd4_open *open)
 }
 
 static struct nfs4_openowner *
-alloc_init_open_stateowner(unsigned int strhashval, struct nfsd4_open *open,
-			   struct nfsd4_compound_state *cstate)
+find_or_alloc_open_stateowner(unsigned int strhashval, struct nfsd4_open *open,
+			      struct nfsd4_compound_state *cstate)
 {
 	struct nfs4_client *clp = cstate->clp;
-	struct nfs4_openowner *oo, *ret;
+	struct nfs4_openowner *oo, *new = NULL;
 
-	oo = alloc_stateowner(openowner_slab, &open->op_owner, clp);
-	if (!oo)
-		return NULL;
-	oo->oo_owner.so_ops = &openowner_ops;
-	oo->oo_owner.so_is_open_owner = 1;
-	oo->oo_owner.so_seqid = open->op_seqid;
-	oo->oo_flags = 0;
-	if (nfsd4_has_session(cstate))
-		oo->oo_flags |= NFS4_OO_CONFIRMED;
-	oo->oo_time = 0;
-	oo->oo_last_closed_stid = NULL;
-	INIT_LIST_HEAD(&oo->oo_close_lru);
+retry:
 	spin_lock(&clp->cl_lock);
-	ret = find_openstateowner_str_locked(strhashval, open, clp);
-	if (ret == NULL) {
-		hash_openowner(oo, clp, strhashval);
-		ret = oo;
-	} else
-		nfs4_free_stateowner(&oo->oo_owner);
-
+	oo = find_openstateowner_str(strhashval, open, clp);
+	if (!oo && new) {
+		hash_openowner(new, clp, strhashval);
+		spin_unlock(&clp->cl_lock);
+		return new;
+	}
 	spin_unlock(&clp->cl_lock);
-	return ret;
+
+	if (oo && !(oo->oo_flags & NFS4_OO_CONFIRMED)) {
+		/* Replace unconfirmed owners without checking for replay. */
+		release_openowner(oo);
+		oo = NULL;
+	}
+	if (oo) {
+		if (new)
+			nfs4_free_stateowner(&new->oo_owner);
+		return oo;
+	}
+
+	new = alloc_stateowner(openowner_slab, &open->op_owner, clp);
+	if (!new)
+		return NULL;
+	new->oo_owner.so_ops = &openowner_ops;
+	new->oo_owner.so_is_open_owner = 1;
+	new->oo_owner.so_seqid = open->op_seqid;
+	new->oo_flags = 0;
+	if (nfsd4_has_session(cstate))
+		new->oo_flags |= NFS4_OO_CONFIRMED;
+	new->oo_time = 0;
+	new->oo_last_closed_stid = NULL;
+	INIT_LIST_HEAD(&new->oo_close_lru);
+	goto retry;
 }
 
 static struct nfs4_ol_stateid *
@@ -4969,7 +5001,11 @@ move_to_close_lru(struct nfs4_ol_stateid *s, struct net *net)
 	 * Wait for the refcount to drop to 2. Since it has been unhashed,
 	 * there should be no danger of the refcount going back up again at
 	 * this point.
+	 * Some threads with a reference might be waiting for rp_locked,
+	 * so tell them to stop waiting.
 	 */
+	atomic_set(&oo->oo_owner.so_replay.rp_locked, RP_UNHASHED);
+	wake_up_var(&oo->oo_owner.so_replay.rp_locked);
 	wait_event(close_wq, refcount_read(&s->st_stid.sc_count) == 2);
 
 	release_all_access(s);
@@ -5342,27 +5378,19 @@ nfsd4_process_open1(struct nfsd4_compound_state *cstate,
 	clp = cstate->clp;
 
 	strhashval = ownerstr_hashval(&open->op_owner);
-	oo = find_openstateowner_str(strhashval, open, clp);
+retry:
+	oo = find_or_alloc_open_stateowner(strhashval, open, cstate);
 	open->op_openowner = oo;
-	if (!oo) {
-		goto new_owner;
-	}
-	if (!(oo->oo_flags & NFS4_OO_CONFIRMED)) {
-		/* Replace unconfirmed owners without checking for replay. */
-		release_openowner(oo);
-		open->op_openowner = NULL;
-		goto new_owner;
+	if (!oo)
+		return nfserr_jukebox;
+	if (nfsd4_cstate_assign_replay(cstate, &oo->oo_owner) == -EAGAIN) {
+		nfs4_put_stateowner(&oo->oo_owner);
+		goto retry;
 	}
 	status = nfsd4_check_seqid(cstate, &oo->oo_owner, open->op_seqid);
 	if (status)
 		return status;
-	goto alloc_stateid;
-new_owner:
-	oo = alloc_init_open_stateowner(strhashval, open, cstate);
-	if (oo == NULL)
-		return nfserr_jukebox;
-	open->op_openowner = oo;
-alloc_stateid:
+
 	open->op_stp = nfs4_alloc_open_stateid(clp);
 	if (!open->op_stp)
 		return nfserr_jukebox;
@@ -5885,6 +5913,28 @@ static void nfsd4_open_deleg_none_ext(struct nfsd4_open *open, int status)
 	}
 }
 
+static bool
+nfs4_delegation_stat(struct nfs4_delegation *dp, struct svc_fh *currentfh,
+		     struct kstat *stat)
+{
+	struct nfsd_file *nf = find_rw_file(dp->dl_stid.sc_file);
+	struct path path;
+	int rc;
+
+	if (!nf)
+		return false;
+
+	path.mnt = currentfh->fh_export->ex_path.mnt;
+	path.dentry = file_dentry(nf->nf_file);
+
+	rc = vfs_getattr(&path, stat,
+			 (STATX_SIZE | STATX_CTIME | STATX_CHANGE_COOKIE),
+			 AT_STATX_SYNC_AS_STAT);
+
+	nfsd_file_put(nf);
+	return rc == 0;
+}
+
 /*
  * The Linux NFS server does not offer write delegations to NFSv4.0
  * clients in order to avoid conflicts between write delegations and
@@ -5920,7 +5970,6 @@ nfs4_open_delegation(struct nfsd4_open *open, struct nfs4_ol_stateid *stp,
 	int cb_up;
 	int status = 0;
 	struct kstat stat;
-	struct path path;
 
 	cb_up = nfsd4_cb_channel_good(oo->oo_owner.so_client);
 	open->op_recall = false;
@@ -5956,20 +6005,16 @@ nfs4_open_delegation(struct nfsd4_open *open, struct nfs4_ol_stateid *stp,
 	memcpy(&open->op_delegate_stateid, &dp->dl_stid.sc_stateid, sizeof(dp->dl_stid.sc_stateid));
 
 	if (open->op_share_access & NFS4_SHARE_ACCESS_WRITE) {
-		open->op_delegate_type = NFS4_OPEN_DELEGATE_WRITE;
-		trace_nfsd_deleg_write(&dp->dl_stid.sc_stateid);
-		path.mnt = currentfh->fh_export->ex_path.mnt;
-		path.dentry = currentfh->fh_dentry;
-		if (vfs_getattr(&path, &stat,
-				(STATX_SIZE | STATX_CTIME | STATX_CHANGE_COOKIE),
-				AT_STATX_SYNC_AS_STAT)) {
+		if (!nfs4_delegation_stat(dp, currentfh, &stat)) {
 			nfs4_put_stid(&dp->dl_stid);
 			destroy_delegation(dp);
 			goto out_no_deleg;
 		}
+		open->op_delegate_type = NFS4_OPEN_DELEGATE_WRITE;
 		dp->dl_cb_fattr.ncf_cur_fsize = stat.size;
 		dp->dl_cb_fattr.ncf_initial_cinfo =
 			nfsd4_change_attribute(&stat, d_inode(currentfh->fh_dentry));
+		trace_nfsd_deleg_write(&dp->dl_stid.sc_stateid);
 	} else {
 		open->op_delegate_type = NFS4_OPEN_DELEGATE_READ;
 		trace_nfsd_deleg_read(&dp->dl_stid.sc_stateid);
@@ -6133,12 +6178,8 @@ out:
 void nfsd4_cleanup_open_state(struct nfsd4_compound_state *cstate,
 			      struct nfsd4_open *open)
 {
-	if (open->op_openowner) {
-		struct nfs4_stateowner *so = &open->op_openowner->oo_owner;
-
-		nfsd4_cstate_assign_replay(cstate, so);
-		nfs4_put_stateowner(so);
-	}
+	if (open->op_openowner)
+		nfs4_put_stateowner(&open->op_openowner->oo_owner);
 	if (open->op_file)
 		kmem_cache_free(file_slab, open->op_file);
 	if (open->op_stp)
@@ -7117,6 +7158,7 @@ nfsd4_free_stateid(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 	switch (s->sc_type) {
 	case SC_TYPE_DELEG:
 		if (s->sc_status & SC_STATUS_REVOKED) {
+			s->sc_status |= SC_STATUS_CLOSED;
 			spin_unlock(&s->sc_lock);
 			dp = delegstateid(s);
 			list_del_init(&dp->dl_recall_lru);
@@ -7202,12 +7244,16 @@ nfs4_preprocess_seqid_op(struct nfsd4_compound_state *cstate, u32 seqid,
 	trace_nfsd_preprocess(seqid, stateid);
 
 	*stpp = NULL;
+retry:
 	status = nfsd4_lookup_stateid(cstate, stateid,
 				      typemask, statusmask, &s, nn);
 	if (status)
 		return status;
 	stp = openlockstateid(s);
-	nfsd4_cstate_assign_replay(cstate, stp->st_stateowner);
+	if (nfsd4_cstate_assign_replay(cstate, stp->st_stateowner) == -EAGAIN) {
+		nfs4_put_stateowner(stp->st_stateowner);
+		goto retry;
+	}
 
 	status = nfs4_seqid_op_checks(cstate, stateid, seqid, stp);
 	if (!status)
@@ -7349,7 +7395,7 @@ out:
 	return status;
 }
 
-static void nfsd4_close_open_stateid(struct nfs4_ol_stateid *s)
+static bool nfsd4_close_open_stateid(struct nfs4_ol_stateid *s)
 {
 	struct nfs4_client *clp = s->st_stid.sc_client;
 	bool unhashed;
@@ -7366,11 +7412,11 @@ static void nfsd4_close_open_stateid(struct nfs4_ol_stateid *s)
 		list_for_each_entry(stp, &reaplist, st_locks)
 			nfs4_free_cpntf_statelist(clp->net, &stp->st_stid);
 		free_ol_stateid_reaplist(&reaplist);
+		return false;
 	} else {
 		spin_unlock(&clp->cl_lock);
 		free_ol_stateid_reaplist(&reaplist);
-		if (unhashed)
-			move_to_close_lru(s, clp->net);
+		return unhashed;
 	}
 }
 
@@ -7386,6 +7432,7 @@ nfsd4_close(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 	struct nfs4_ol_stateid *stp;
 	struct net *net = SVC_NET(rqstp);
 	struct nfsd_net *nn = net_generic(net, nfsd_net_id);
+	bool need_move_to_close_list;
 
 	dprintk("NFSD: nfsd4_close on file %pd\n",
 			cstate->current_fh.fh_dentry);
@@ -7410,8 +7457,10 @@ nfsd4_close(struct svc_rqst *rqstp, struct nfsd4_compound_state *cstate,
 	 */
 	nfs4_inc_and_copy_stateid(&close->cl_stateid, &stp->st_stid);
 
-	nfsd4_close_open_stateid(stp);
+	need_move_to_close_list = nfsd4_close_open_stateid(stp);
 	mutex_unlock(&stp->st_mutex);
+	if (need_move_to_close_list)
+		move_to_close_lru(stp, net);
 
 	/* v4.1+ suggests that we send a special stateid in here, since the
 	 * clients should just ignore this anyway. Since this is not useful
@@ -8527,6 +8576,7 @@ static int nfs4_state_create_net(struct net *net)
 	spin_lock_init(&nn->client_lock);
 	spin_lock_init(&nn->s2s_cp_lock);
 	idr_init(&nn->s2s_cp_stateids);
+	atomic_set(&nn->pending_async_copies, 0);
 
 	spin_lock_init(&nn->blocked_locks_lock);
 	INIT_LIST_HEAD(&nn->blocked_locks_lru);
@@ -8625,12 +8675,6 @@ nfs4_state_start(void)
 	if (ret)
 		return ret;
 
-	ret = nfsd4_create_callback_queue();
-	if (ret) {
-		rhltable_destroy(&nfs4_file_rhltable);
-		return ret;
-	}
-
 	set_max_delegations();
 	return 0;
 }
@@ -8671,7 +8715,6 @@ nfs4_state_shutdown_net(struct net *net)
 void
 nfs4_state_shutdown(void)
 {
-	nfsd4_destroy_callback_queue();
 	rhltable_destroy(&nfs4_file_rhltable);
 }
 
@@ -8792,7 +8835,7 @@ nfsd4_get_writestateid(struct nfsd4_compound_state *cstate,
 /**
  * nfsd4_deleg_getattr_conflict - Recall if GETATTR causes conflict
  * @rqstp: RPC transaction context
- * @inode: file to be checked for a conflict
+ * @dentry: dentry of inode to be checked for a conflict
  * @modified: return true if file was modified
  * @size: new size of file if modified is true
  *
@@ -8807,80 +8850,92 @@ nfsd4_get_writestateid(struct nfsd4_compound_state *cstate,
  * code is returned.
  */
 __be32
-nfsd4_deleg_getattr_conflict(struct svc_rqst *rqstp, struct inode *inode,
+nfsd4_deleg_getattr_conflict(struct svc_rqst *rqstp, struct dentry *dentry,
 				bool *modified, u64 *size)
 {
 	__be32 status;
 	struct nfsd_net *nn = net_generic(SVC_NET(rqstp), nfsd_net_id);
 	struct file_lock_context *ctx;
+	struct nfs4_delegation *dp = NULL;
 	struct file_lease *fl;
-	struct nfs4_delegation *dp;
 	struct iattr attrs;
 	struct nfs4_cb_fattr *ncf;
+	struct inode *inode = d_inode(dentry);
 
 	*modified = false;
 	ctx = locks_inode_context(inode);
 	if (!ctx)
 		return 0;
+
+#define NON_NFSD_LEASE ((void *)1)
+
 	spin_lock(&ctx->flc_lock);
 	for_each_file_lock(fl, &ctx->flc_lease) {
-		unsigned char type = fl->c.flc_type;
-
 		if (fl->c.flc_flags == FL_LAYOUT)
 			continue;
-		if (fl->fl_lmops != &nfsd_lease_mng_ops) {
-			/*
-			 * non-nfs lease, if it's a lease with F_RDLCK then
-			 * we are done; there isn't any write delegation
-			 * on this inode
-			 */
-			if (type == F_RDLCK)
-				break;
-			goto break_lease;
-		}
-		if (type == F_WRLCK) {
-			dp = fl->c.flc_owner;
-			if (dp->dl_recall.cb_clp == *(rqstp->rq_lease_breaker)) {
-				spin_unlock(&ctx->flc_lock);
-				return 0;
-			}
-break_lease:
-			nfsd_stats_wdeleg_getattr_inc(nn);
-			dp = fl->c.flc_owner;
-			ncf = &dp->dl_cb_fattr;
-			nfs4_cb_getattr(&dp->dl_cb_fattr);
-			spin_unlock(&ctx->flc_lock);
-			wait_on_bit_timeout(&ncf->ncf_cb_flags, CB_GETATTR_BUSY,
-					TASK_INTERRUPTIBLE, NFSD_CB_GETATTR_TIMEOUT);
-			if (ncf->ncf_cb_status) {
-				/* Recall delegation only if client didn't respond */
-				status = nfserrno(nfsd_open_break_lease(inode, NFSD_MAY_READ));
-				if (status != nfserr_jukebox ||
-						!nfsd_wait_for_delegreturn(rqstp, inode))
-					return status;
-			}
-			if (!ncf->ncf_file_modified &&
-					(ncf->ncf_initial_cinfo != ncf->ncf_cb_change ||
-					ncf->ncf_cur_fsize != ncf->ncf_cb_fsize))
-				ncf->ncf_file_modified = true;
-			if (ncf->ncf_file_modified) {
-				/*
-				 * Per section 10.4.3 of RFC 8881, the server would
-				 * not update the file's metadata with the client's
-				 * modified size
-				 */
-				attrs.ia_mtime = attrs.ia_ctime = current_time(inode);
-				attrs.ia_valid = ATTR_MTIME | ATTR_CTIME;
-				setattr_copy(&nop_mnt_idmap, inode, &attrs);
-				mark_inode_dirty(inode);
-				ncf->ncf_cur_fsize = ncf->ncf_cb_fsize;
-				*size = ncf->ncf_cur_fsize;
-				*modified = true;
-			}
-			return 0;
+		if (fl->c.flc_type == F_WRLCK) {
+			if (fl->fl_lmops == &nfsd_lease_mng_ops)
+				dp = fl->c.flc_owner;
+			else
+				dp = NON_NFSD_LEASE;
 		}
 		break;
 	}
+	if (dp == NULL || dp == NON_NFSD_LEASE ||
+	    dp->dl_recall.cb_clp == *(rqstp->rq_lease_breaker)) {
+		spin_unlock(&ctx->flc_lock);
+		if (dp == NON_NFSD_LEASE) {
+			status = nfserrno(nfsd_open_break_lease(inode,
+								NFSD_MAY_READ));
+			if (status != nfserr_jukebox ||
+			    !nfsd_wait_for_delegreturn(rqstp, inode))
+				return status;
+		}
+		return 0;
+	}
+
+	nfsd_stats_wdeleg_getattr_inc(nn);
+	refcount_inc(&dp->dl_stid.sc_count);
+	ncf = &dp->dl_cb_fattr;
+	nfs4_cb_getattr(&dp->dl_cb_fattr);
 	spin_unlock(&ctx->flc_lock);
-	return 0;
+
+	wait_on_bit_timeout(&ncf->ncf_cb_flags, CB_GETATTR_BUSY,
+			    TASK_INTERRUPTIBLE, NFSD_CB_GETATTR_TIMEOUT);
+	if (ncf->ncf_cb_status) {
+		/* Recall delegation only if client didn't respond */
+		status = nfserrno(nfsd_open_break_lease(inode, NFSD_MAY_READ));
+		if (status != nfserr_jukebox ||
+		    !nfsd_wait_for_delegreturn(rqstp, inode))
+			goto out_status;
+	}
+	if (!ncf->ncf_file_modified &&
+	    (ncf->ncf_initial_cinfo != ncf->ncf_cb_change ||
+	     ncf->ncf_cur_fsize != ncf->ncf_cb_fsize))
+		ncf->ncf_file_modified = true;
+	if (ncf->ncf_file_modified) {
+		int err;
+
+		/*
+		 * Per section 10.4.3 of RFC 8881, the server would
+		 * not update the file's metadata with the client's
+		 * modified size
+		 */
+		attrs.ia_mtime = attrs.ia_ctime = current_time(inode);
+		attrs.ia_valid = ATTR_MTIME | ATTR_CTIME | ATTR_DELEG;
+		inode_lock(inode);
+		err = notify_change(&nop_mnt_idmap, dentry, &attrs, NULL);
+		inode_unlock(inode);
+		if (err) {
+			status = nfserrno(err);
+			goto out_status;
+		}
+		ncf->ncf_cur_fsize = ncf->ncf_cb_fsize;
+		*size = ncf->ncf_cur_fsize;
+		*modified = true;
+	}
+	status = 0;
+out_status:
+	nfs4_put_stid(&dp->dl_stid);
+	return status;
 }

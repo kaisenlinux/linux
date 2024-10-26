@@ -12,6 +12,8 @@
 #include <linux/node.h>
 #include <linux/io.h>
 
+extern const struct nvdimm_security_ops *cxl_security_ops;
+
 /**
  * DOC: cxl objects
  *
@@ -432,14 +434,13 @@ struct cxl_switch_decoder {
 };
 
 struct cxl_root_decoder;
-typedef struct cxl_dport *(*cxl_calc_hb_fn)(struct cxl_root_decoder *cxlrd,
-					    int pos);
+typedef u64 (*cxl_hpa_to_spa_fn)(struct cxl_root_decoder *cxlrd, u64 hpa);
 
 /**
  * struct cxl_root_decoder - Static platform CXL address decoder
  * @res: host / parent resource for region allocations
  * @region_id: region id for next region provisioning event
- * @calc_hb: which host bridge covers the n'th position by granularity
+ * @hpa_to_spa: translate CXL host-physical-address to Platform system-physical-address
  * @platform_data: platform specific configuration data
  * @range_lock: sync region autodiscovery by address range
  * @qos_class: QoS performance class cookie
@@ -448,7 +449,7 @@ typedef struct cxl_dport *(*cxl_calc_hb_fn)(struct cxl_root_decoder *cxlrd,
 struct cxl_root_decoder {
 	struct resource *res;
 	atomic_t region_id;
-	cxl_calc_hb_fn calc_hb;
+	cxl_hpa_to_spa_fn hpa_to_spa;
 	void *platform_data;
 	struct mutex range_lock;
 	int qos_class;
@@ -522,6 +523,7 @@ struct cxl_region_params {
  * @params: active + config params for the region
  * @coord: QoS access coordinates for the region
  * @memory_notifier: notifier for setting the access coordinates to node
+ * @adist_notifier: notifier for calculating the abstract distance of node
  */
 struct cxl_region {
 	struct device dev;
@@ -534,6 +536,7 @@ struct cxl_region {
 	struct cxl_region_params params;
 	struct access_coordinate coord[ACCESS_COORDINATE_MAX];
 	struct notifier_block memory_notifier;
+	struct notifier_block adist_notifier;
 };
 
 struct cxl_nvdimm_bridge {
@@ -772,15 +775,18 @@ bool is_root_decoder(struct device *dev);
 bool is_switch_decoder(struct device *dev);
 bool is_endpoint_decoder(struct device *dev);
 struct cxl_root_decoder *cxl_root_decoder_alloc(struct cxl_port *port,
-						unsigned int nr_targets,
-						cxl_calc_hb_fn calc_hb);
-struct cxl_dport *cxl_hb_modulo(struct cxl_root_decoder *cxlrd, int pos);
+						unsigned int nr_targets);
 struct cxl_switch_decoder *cxl_switch_decoder_alloc(struct cxl_port *port,
 						    unsigned int nr_targets);
 int cxl_decoder_add(struct cxl_decoder *cxld, int *target_map);
 struct cxl_endpoint_decoder *cxl_endpoint_decoder_alloc(struct cxl_port *port);
 int cxl_decoder_add_locked(struct cxl_decoder *cxld, int *target_map);
 int cxl_decoder_autoremove(struct device *host, struct cxl_decoder *cxld);
+static inline int cxl_root_decoder_autoremove(struct device *host,
+					      struct cxl_root_decoder *cxlrd)
+{
+	return cxl_decoder_autoremove(host, &cxlrd->cxlsd.cxld);
+}
 int cxl_endpoint_autoremove(struct cxl_memdev *cxlmd, struct cxl_port *endpoint);
 
 /**
@@ -818,10 +824,7 @@ struct cxl_driver {
 	int id;
 };
 
-static inline struct cxl_driver *to_cxl_drv(struct device_driver *drv)
-{
-	return container_of(drv, struct cxl_driver, drv);
-}
+#define to_cxl_drv(__drv)	container_of_const(__drv, struct cxl_driver, drv)
 
 int __cxl_driver_register(struct cxl_driver *cxl_drv, struct module *owner,
 			  const char *modname);

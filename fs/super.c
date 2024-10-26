@@ -274,6 +274,7 @@ static void destroy_super_work(struct work_struct *work)
 {
 	struct super_block *s = container_of(work, struct super_block,
 							destroy_work);
+	fsnotify_sb_free(s);
 	security_sb_free(s);
 	put_user_ns(s->s_user_ns);
 	kfree(s->s_subtype);
@@ -734,6 +735,17 @@ struct super_block *sget_fc(struct fs_context *fc,
 	struct super_block *old;
 	struct user_namespace *user_ns = fc->global ? &init_user_ns : fc->user_ns;
 	int err;
+
+	/*
+	 * Never allow s_user_ns != &init_user_ns when FS_USERNS_MOUNT is
+	 * not set, as the filesystem is likely unprepared to handle it.
+	 * This can happen when fsconfig() is called from init_user_ns with
+	 * an fs_fd opened in another user namespace.
+	 */
+	if (user_ns != &init_user_ns && !(fc->fs_type->fs_flags & FS_USERNS_MOUNT)) {
+		errorfc(fc, "VFS: Mounting from non-initial user namespace is not allowed");
+		return ERR_PTR(-EPERM);
+	}
 
 retry:
 	spin_lock(&sb_lock);
@@ -1790,8 +1802,8 @@ int vfs_get_tree(struct fs_context *fc)
 		return error;
 
 	if (!fc->root) {
-		pr_err("Filesystem %s get_tree() didn't set fc->root\n",
-		       fc->fs_type->name);
+		pr_err("Filesystem %s get_tree() didn't set fc->root, returned %i\n",
+		       fc->fs_type->name, error);
 		/* We don't know what the locking state of the superblock is -
 		 * if there is a superblock.
 		 */

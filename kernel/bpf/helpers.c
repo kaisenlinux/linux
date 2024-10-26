@@ -517,11 +517,12 @@ static int __bpf_strtoll(const char *buf, size_t buf_len, u64 flags,
 }
 
 BPF_CALL_4(bpf_strtol, const char *, buf, size_t, buf_len, u64, flags,
-	   long *, res)
+	   s64 *, res)
 {
 	long long _res;
 	int err;
 
+	*res = 0;
 	err = __bpf_strtoll(buf, buf_len, flags, &_res);
 	if (err < 0)
 		return err;
@@ -538,16 +539,18 @@ const struct bpf_func_proto bpf_strtol_proto = {
 	.arg1_type	= ARG_PTR_TO_MEM | MEM_RDONLY,
 	.arg2_type	= ARG_CONST_SIZE,
 	.arg3_type	= ARG_ANYTHING,
-	.arg4_type	= ARG_PTR_TO_LONG,
+	.arg4_type	= ARG_PTR_TO_FIXED_SIZE_MEM | MEM_UNINIT | MEM_ALIGNED,
+	.arg4_size	= sizeof(s64),
 };
 
 BPF_CALL_4(bpf_strtoul, const char *, buf, size_t, buf_len, u64, flags,
-	   unsigned long *, res)
+	   u64 *, res)
 {
 	unsigned long long _res;
 	bool is_negative;
 	int err;
 
+	*res = 0;
 	err = __bpf_strtoull(buf, buf_len, flags, &_res, &is_negative);
 	if (err < 0)
 		return err;
@@ -566,7 +569,8 @@ const struct bpf_func_proto bpf_strtoul_proto = {
 	.arg1_type	= ARG_PTR_TO_MEM | MEM_RDONLY,
 	.arg2_type	= ARG_CONST_SIZE,
 	.arg3_type	= ARG_ANYTHING,
-	.arg4_type	= ARG_PTR_TO_LONG,
+	.arg4_type	= ARG_PTR_TO_FIXED_SIZE_MEM | MEM_UNINIT | MEM_ALIGNED,
+	.arg4_size	= sizeof(u64),
 };
 
 BPF_CALL_3(bpf_strncmp, const char *, s1, u32, s1_sz, const char *, s2)
@@ -1113,11 +1117,18 @@ struct bpf_hrtimer {
 	atomic_t cancelling;
 };
 
-/* the actual struct hidden inside uapi struct bpf_timer */
+struct bpf_work {
+	struct bpf_async_cb cb;
+	struct work_struct work;
+	struct work_struct delete_work;
+};
+
+/* the actual struct hidden inside uapi struct bpf_timer and bpf_wq */
 struct bpf_async_kern {
 	union {
 		struct bpf_async_cb *cb;
 		struct bpf_hrtimer *timer;
+		struct bpf_work *work;
 	};
 	/* bpf_spin_lock is used here instead of spinlock_t to make
 	 * sure that it always fits into space reserved by struct bpf_timer
@@ -1128,6 +1139,7 @@ struct bpf_async_kern {
 
 enum bpf_async_type {
 	BPF_ASYNC_TYPE_TIMER = 0,
+	BPF_ASYNC_TYPE_WQ,
 };
 
 static DEFINE_PER_CPU(struct bpf_hrtimer *, hrtimer_running);
@@ -1171,6 +1183,50 @@ out:
 	return HRTIMER_NORESTART;
 }
 
+static void bpf_wq_work(struct work_struct *work)
+{
+	struct bpf_work *w = container_of(work, struct bpf_work, work);
+	struct bpf_async_cb *cb = &w->cb;
+	struct bpf_map *map = cb->map;
+	bpf_callback_t callback_fn;
+	void *value = cb->value;
+	void *key;
+	u32 idx;
+
+	BTF_TYPE_EMIT(struct bpf_wq);
+
+	callback_fn = READ_ONCE(cb->callback_fn);
+	if (!callback_fn)
+		return;
+
+	if (map->map_type == BPF_MAP_TYPE_ARRAY) {
+		struct bpf_array *array = container_of(map, struct bpf_array, map);
+
+		/* compute the key */
+		idx = ((char *)value - array->value) / array->elem_size;
+		key = &idx;
+	} else { /* hash or lru */
+		key = value - round_up(map->key_size, 8);
+	}
+
+        rcu_read_lock_trace();
+        migrate_disable();
+
+	callback_fn((u64)(long)map, (u64)(long)key, (u64)(long)value, 0, 0);
+
+	migrate_enable();
+	rcu_read_unlock_trace();
+}
+
+static void bpf_wq_delete_work(struct work_struct *work)
+{
+	struct bpf_work *w = container_of(work, struct bpf_work, delete_work);
+
+	cancel_work_sync(&w->work);
+
+	kfree_rcu(w, cb.rcu);
+}
+
 static void bpf_timer_delete_work(struct work_struct *work)
 {
 	struct bpf_hrtimer *t = container_of(work, struct bpf_hrtimer, cb.delete_work);
@@ -1191,6 +1247,7 @@ static int __bpf_async_init(struct bpf_async_kern *async, struct bpf_map *map, u
 {
 	struct bpf_async_cb *cb;
 	struct bpf_hrtimer *t;
+	struct bpf_work *w;
 	clockid_t clockid;
 	size_t size;
 	int ret = 0;
@@ -1201,6 +1258,9 @@ static int __bpf_async_init(struct bpf_async_kern *async, struct bpf_map *map, u
 	switch (type) {
 	case BPF_ASYNC_TYPE_TIMER:
 		size = sizeof(struct bpf_hrtimer);
+		break;
+	case BPF_ASYNC_TYPE_WQ:
+		size = sizeof(struct bpf_work);
 		break;
 	default:
 		return -EINVAL;
@@ -1220,7 +1280,8 @@ static int __bpf_async_init(struct bpf_async_kern *async, struct bpf_map *map, u
 		goto out;
 	}
 
-	if (type == BPF_ASYNC_TYPE_TIMER) {
+	switch (type) {
+	case BPF_ASYNC_TYPE_TIMER:
 		clockid = flags & (MAX_CLOCKS - 1);
 		t = (struct bpf_hrtimer *)cb;
 
@@ -1229,6 +1290,14 @@ static int __bpf_async_init(struct bpf_async_kern *async, struct bpf_map *map, u
 		hrtimer_init(&t->timer, clockid, HRTIMER_MODE_REL_SOFT);
 		t->timer.function = bpf_timer_cb;
 		cb->value = (void *)async - map->record->timer_off;
+		break;
+	case BPF_ASYNC_TYPE_WQ:
+		w = (struct bpf_work *)cb;
+
+		INIT_WORK(&w->work, bpf_wq_work);
+		INIT_WORK(&w->delete_work, bpf_wq_delete_work);
+		cb->value = (void *)async - map->record->wq_off;
+		break;
 	}
 	cb->map = map;
 	cb->prog = NULL;
@@ -1283,22 +1352,23 @@ static const struct bpf_func_proto bpf_timer_init_proto = {
 	.arg3_type	= ARG_ANYTHING,
 };
 
-BPF_CALL_3(bpf_timer_set_callback, struct bpf_async_kern *, timer, void *, callback_fn,
-	   struct bpf_prog_aux *, aux)
+static int __bpf_async_set_callback(struct bpf_async_kern *async, void *callback_fn,
+				    struct bpf_prog_aux *aux, unsigned int flags,
+				    enum bpf_async_type type)
 {
 	struct bpf_prog *prev, *prog = aux->prog;
-	struct bpf_hrtimer *t;
+	struct bpf_async_cb *cb;
 	int ret = 0;
 
 	if (in_nmi())
 		return -EOPNOTSUPP;
-	__bpf_spin_lock_irqsave(&timer->lock);
-	t = timer->timer;
-	if (!t) {
+	__bpf_spin_lock_irqsave(&async->lock);
+	cb = async->cb;
+	if (!cb) {
 		ret = -EINVAL;
 		goto out;
 	}
-	if (!atomic64_read(&t->cb.map->usercnt)) {
+	if (!atomic64_read(&cb->map->usercnt)) {
 		/* maps with timers must be either held by user space
 		 * or pinned in bpffs. Otherwise timer might still be
 		 * running even when bpf prog is detached and user space
@@ -1307,7 +1377,7 @@ BPF_CALL_3(bpf_timer_set_callback, struct bpf_async_kern *, timer, void *, callb
 		ret = -EPERM;
 		goto out;
 	}
-	prev = t->cb.prog;
+	prev = cb->prog;
 	if (prev != prog) {
 		/* Bump prog refcnt once. Every bpf_timer_set_callback()
 		 * can pick different callback_fn-s within the same prog.
@@ -1320,12 +1390,18 @@ BPF_CALL_3(bpf_timer_set_callback, struct bpf_async_kern *, timer, void *, callb
 		if (prev)
 			/* Drop prev prog refcnt when swapping with new prog */
 			bpf_prog_put(prev);
-		t->cb.prog = prog;
+		cb->prog = prog;
 	}
-	rcu_assign_pointer(t->cb.callback_fn, callback_fn);
+	rcu_assign_pointer(cb->callback_fn, callback_fn);
 out:
-	__bpf_spin_unlock_irqrestore(&timer->lock);
+	__bpf_spin_unlock_irqrestore(&async->lock);
 	return ret;
+}
+
+BPF_CALL_3(bpf_timer_set_callback, struct bpf_async_kern *, timer, void *, callback_fn,
+	   struct bpf_prog_aux *, aux)
+{
+	return __bpf_async_set_callback(timer, callback_fn, aux, 0, BPF_ASYNC_TYPE_TIMER);
 }
 
 static const struct bpf_func_proto bpf_timer_set_callback_proto = {
@@ -1457,30 +1533,38 @@ static const struct bpf_func_proto bpf_timer_cancel_proto = {
 	.arg1_type	= ARG_PTR_TO_TIMER,
 };
 
+static struct bpf_async_cb *__bpf_async_cancel_and_free(struct bpf_async_kern *async)
+{
+	struct bpf_async_cb *cb;
+
+	/* Performance optimization: read async->cb without lock first. */
+	if (!READ_ONCE(async->cb))
+		return NULL;
+
+	__bpf_spin_lock_irqsave(&async->lock);
+	/* re-read it under lock */
+	cb = async->cb;
+	if (!cb)
+		goto out;
+	drop_prog_refcnt(cb);
+	/* The subsequent bpf_timer_start/cancel() helpers won't be able to use
+	 * this timer, since it won't be initialized.
+	 */
+	WRITE_ONCE(async->cb, NULL);
+out:
+	__bpf_spin_unlock_irqrestore(&async->lock);
+	return cb;
+}
+
 /* This function is called by map_delete/update_elem for individual element and
  * by ops->map_release_uref when the user space reference to a map reaches zero.
  */
 void bpf_timer_cancel_and_free(void *val)
 {
-	struct bpf_async_kern *timer = val;
 	struct bpf_hrtimer *t;
 
-	/* Performance optimization: read timer->timer without lock first. */
-	if (!READ_ONCE(timer->timer))
-		return;
+	t = (struct bpf_hrtimer *)__bpf_async_cancel_and_free(val);
 
-	__bpf_spin_lock_irqsave(&timer->lock);
-	/* re-read it under lock */
-	t = timer->timer;
-	if (!t)
-		goto out;
-	drop_prog_refcnt(&t->cb);
-	/* The subsequent bpf_timer_start/cancel() helpers won't be able to use
-	 * this timer, since it won't be initialized.
-	 */
-	WRITE_ONCE(timer->timer, NULL);
-out:
-	__bpf_spin_unlock_irqrestore(&timer->lock);
 	if (!t)
 		return;
 	/* We check that bpf_map_delete/update_elem() was called from timer
@@ -1489,7 +1573,7 @@ out:
 	 * just return -1). Though callback_fn is still running on this cpu it's
 	 * safe to do kfree(t) because bpf_timer_cb() read everything it needed
 	 * from 't'. The bpf subprog callback_fn won't be able to access 't',
-	 * since timer->timer = NULL was already done. The timer will be
+	 * since async->cb = NULL was already done. The timer will be
 	 * effectively cancelled because bpf_timer_cb() will return
 	 * HRTIMER_NORESTART.
 	 *
@@ -1516,6 +1600,26 @@ out:
 		queue_work(system_unbound_wq, &t->cb.delete_work);
 	else
 		bpf_timer_delete_work(&t->cb.delete_work);
+}
+
+/* This function is called by map_delete/update_elem for individual element and
+ * by ops->map_release_uref when the user space reference to a map reaches zero.
+ */
+void bpf_wq_cancel_and_free(void *val)
+{
+	struct bpf_work *work;
+
+	BTF_TYPE_EMIT(struct bpf_wq);
+
+	work = (struct bpf_work *)__bpf_async_cancel_and_free(val);
+	if (!work)
+		return;
+	/* Trigger cancel of the sleepable work, but *do not* wait for
+	 * it to finish if it was running as we might not be in a
+	 * sleepable context.
+	 * kfree will be called once the work has finished.
+	 */
+	schedule_work(&work->delete_work);
 }
 
 BPF_CALL_2(bpf_kptr_xchg, void *, map_value, void *, ptr)
@@ -1548,7 +1652,7 @@ static const struct bpf_func_proto bpf_kptr_xchg_proto = {
 #define DYNPTR_SIZE_MASK	0xFFFFFF
 #define DYNPTR_RDONLY_BIT	BIT(31)
 
-static bool __bpf_dynptr_is_rdonly(const struct bpf_dynptr_kern *ptr)
+bool __bpf_dynptr_is_rdonly(const struct bpf_dynptr_kern *ptr)
 {
 	return ptr->size & DYNPTR_RDONLY_BIT;
 }
@@ -1835,6 +1939,10 @@ bpf_base_func_proto(enum bpf_func_id func_id, const struct bpf_prog *prog)
 		return &bpf_strtol_proto;
 	case BPF_FUNC_strtoul:
 		return &bpf_strtoul_proto;
+	case BPF_FUNC_get_current_pid_tgid:
+		return &bpf_get_current_pid_tgid_proto;
+	case BPF_FUNC_get_ns_current_pid_tgid:
+		return &bpf_get_ns_current_pid_tgid_proto;
 	default:
 		break;
 	}
@@ -2394,7 +2502,7 @@ __bpf_kfunc struct task_struct *bpf_task_from_pid(s32 pid)
 
 /**
  * bpf_dynptr_slice() - Obtain a read-only pointer to the dynptr data.
- * @ptr: The dynptr whose data slice to retrieve
+ * @p: The dynptr whose data slice to retrieve
  * @offset: Offset into the dynptr
  * @buffer__opt: User-provided buffer to copy contents into.  May be NULL
  * @buffer__szk: Size (in bytes) of the buffer if present. This is the
@@ -2420,9 +2528,10 @@ __bpf_kfunc struct task_struct *bpf_task_from_pid(s32 pid)
  * provided buffer, with its contents containing the data, if unable to obtain
  * direct pointer)
  */
-__bpf_kfunc void *bpf_dynptr_slice(const struct bpf_dynptr_kern *ptr, u32 offset,
+__bpf_kfunc void *bpf_dynptr_slice(const struct bpf_dynptr *p, u32 offset,
 				   void *buffer__opt, u32 buffer__szk)
 {
+	const struct bpf_dynptr_kern *ptr = (struct bpf_dynptr_kern *)p;
 	enum bpf_dynptr_type type;
 	u32 len = buffer__szk;
 	int err;
@@ -2464,7 +2573,7 @@ __bpf_kfunc void *bpf_dynptr_slice(const struct bpf_dynptr_kern *ptr, u32 offset
 
 /**
  * bpf_dynptr_slice_rdwr() - Obtain a writable pointer to the dynptr data.
- * @ptr: The dynptr whose data slice to retrieve
+ * @p: The dynptr whose data slice to retrieve
  * @offset: Offset into the dynptr
  * @buffer__opt: User-provided buffer to copy contents into. May be NULL
  * @buffer__szk: Size (in bytes) of the buffer if present. This is the
@@ -2504,16 +2613,18 @@ __bpf_kfunc void *bpf_dynptr_slice(const struct bpf_dynptr_kern *ptr, u32 offset
  * provided buffer, with its contents containing the data, if unable to obtain
  * direct pointer)
  */
-__bpf_kfunc void *bpf_dynptr_slice_rdwr(const struct bpf_dynptr_kern *ptr, u32 offset,
+__bpf_kfunc void *bpf_dynptr_slice_rdwr(const struct bpf_dynptr *p, u32 offset,
 					void *buffer__opt, u32 buffer__szk)
 {
+	const struct bpf_dynptr_kern *ptr = (struct bpf_dynptr_kern *)p;
+
 	if (!ptr->data || __bpf_dynptr_is_rdonly(ptr))
 		return NULL;
 
 	/* bpf_dynptr_slice_rdwr is the same logic as bpf_dynptr_slice.
 	 *
 	 * For skb-type dynptrs, it is safe to write into the returned pointer
-	 * if the bpf program allows skb data writes. There are two possiblities
+	 * if the bpf program allows skb data writes. There are two possibilities
 	 * that may occur when calling bpf_dynptr_slice_rdwr:
 	 *
 	 * 1) The requested slice is in the head of the skb. In this case, the
@@ -2532,11 +2643,12 @@ __bpf_kfunc void *bpf_dynptr_slice_rdwr(const struct bpf_dynptr_kern *ptr, u32 o
 	 * will be copied out into the buffer and the user will need to call
 	 * bpf_dynptr_write() to commit changes.
 	 */
-	return bpf_dynptr_slice(ptr, offset, buffer__opt, buffer__szk);
+	return bpf_dynptr_slice(p, offset, buffer__opt, buffer__szk);
 }
 
-__bpf_kfunc int bpf_dynptr_adjust(struct bpf_dynptr_kern *ptr, u32 start, u32 end)
+__bpf_kfunc int bpf_dynptr_adjust(const struct bpf_dynptr *p, u32 start, u32 end)
 {
+	struct bpf_dynptr_kern *ptr = (struct bpf_dynptr_kern *)p;
 	u32 size;
 
 	if (!ptr->data || start > end)
@@ -2553,36 +2665,45 @@ __bpf_kfunc int bpf_dynptr_adjust(struct bpf_dynptr_kern *ptr, u32 start, u32 en
 	return 0;
 }
 
-__bpf_kfunc bool bpf_dynptr_is_null(struct bpf_dynptr_kern *ptr)
+__bpf_kfunc bool bpf_dynptr_is_null(const struct bpf_dynptr *p)
 {
+	struct bpf_dynptr_kern *ptr = (struct bpf_dynptr_kern *)p;
+
 	return !ptr->data;
 }
 
-__bpf_kfunc bool bpf_dynptr_is_rdonly(struct bpf_dynptr_kern *ptr)
+__bpf_kfunc bool bpf_dynptr_is_rdonly(const struct bpf_dynptr *p)
 {
+	struct bpf_dynptr_kern *ptr = (struct bpf_dynptr_kern *)p;
+
 	if (!ptr->data)
 		return false;
 
 	return __bpf_dynptr_is_rdonly(ptr);
 }
 
-__bpf_kfunc __u32 bpf_dynptr_size(const struct bpf_dynptr_kern *ptr)
+__bpf_kfunc __u32 bpf_dynptr_size(const struct bpf_dynptr *p)
 {
+	struct bpf_dynptr_kern *ptr = (struct bpf_dynptr_kern *)p;
+
 	if (!ptr->data)
 		return -EINVAL;
 
 	return __bpf_dynptr_size(ptr);
 }
 
-__bpf_kfunc int bpf_dynptr_clone(struct bpf_dynptr_kern *ptr,
-				 struct bpf_dynptr_kern *clone__uninit)
+__bpf_kfunc int bpf_dynptr_clone(const struct bpf_dynptr *p,
+				 struct bpf_dynptr *clone__uninit)
 {
+	struct bpf_dynptr_kern *clone = (struct bpf_dynptr_kern *)clone__uninit;
+	struct bpf_dynptr_kern *ptr = (struct bpf_dynptr_kern *)p;
+
 	if (!ptr->data) {
-		bpf_dynptr_set_null(clone__uninit);
+		bpf_dynptr_set_null(clone);
 		return -EINVAL;
 	}
 
-	*clone__uninit = *ptr;
+	*clone = *ptr;
 
 	return 0;
 }
@@ -2648,6 +2769,177 @@ __bpf_kfunc void bpf_throw(u64 cookie)
 	kasan_unpoison_task_stack_below((void *)(long)ctx.sp);
 	ctx.aux->bpf_exception_cb(cookie, ctx.sp, ctx.bp, 0, 0);
 	WARN(1, "A call to BPF exception callback should never return\n");
+}
+
+__bpf_kfunc int bpf_wq_init(struct bpf_wq *wq, void *p__map, unsigned int flags)
+{
+	struct bpf_async_kern *async = (struct bpf_async_kern *)wq;
+	struct bpf_map *map = p__map;
+
+	BUILD_BUG_ON(sizeof(struct bpf_async_kern) > sizeof(struct bpf_wq));
+	BUILD_BUG_ON(__alignof__(struct bpf_async_kern) != __alignof__(struct bpf_wq));
+
+	if (flags)
+		return -EINVAL;
+
+	return __bpf_async_init(async, map, flags, BPF_ASYNC_TYPE_WQ);
+}
+
+__bpf_kfunc int bpf_wq_start(struct bpf_wq *wq, unsigned int flags)
+{
+	struct bpf_async_kern *async = (struct bpf_async_kern *)wq;
+	struct bpf_work *w;
+
+	if (in_nmi())
+		return -EOPNOTSUPP;
+	if (flags)
+		return -EINVAL;
+	w = READ_ONCE(async->work);
+	if (!w || !READ_ONCE(w->cb.prog))
+		return -EINVAL;
+
+	schedule_work(&w->work);
+	return 0;
+}
+
+__bpf_kfunc int bpf_wq_set_callback_impl(struct bpf_wq *wq,
+					 int (callback_fn)(void *map, int *key, void *value),
+					 unsigned int flags,
+					 void *aux__ign)
+{
+	struct bpf_prog_aux *aux = (struct bpf_prog_aux *)aux__ign;
+	struct bpf_async_kern *async = (struct bpf_async_kern *)wq;
+
+	if (flags)
+		return -EINVAL;
+
+	return __bpf_async_set_callback(async, callback_fn, aux, flags, BPF_ASYNC_TYPE_WQ);
+}
+
+__bpf_kfunc void bpf_preempt_disable(void)
+{
+	preempt_disable();
+}
+
+__bpf_kfunc void bpf_preempt_enable(void)
+{
+	preempt_enable();
+}
+
+struct bpf_iter_bits {
+	__u64 __opaque[2];
+} __aligned(8);
+
+struct bpf_iter_bits_kern {
+	union {
+		unsigned long *bits;
+		unsigned long bits_copy;
+	};
+	u32 nr_bits;
+	int bit;
+} __aligned(8);
+
+/**
+ * bpf_iter_bits_new() - Initialize a new bits iterator for a given memory area
+ * @it: The new bpf_iter_bits to be created
+ * @unsafe_ptr__ign: A pointer pointing to a memory area to be iterated over
+ * @nr_words: The size of the specified memory area, measured in 8-byte units.
+ * Due to the limitation of memalloc, it can't be greater than 512.
+ *
+ * This function initializes a new bpf_iter_bits structure for iterating over
+ * a memory area which is specified by the @unsafe_ptr__ign and @nr_words. It
+ * copies the data of the memory area to the newly created bpf_iter_bits @it for
+ * subsequent iteration operations.
+ *
+ * On success, 0 is returned. On failure, ERR is returned.
+ */
+__bpf_kfunc int
+bpf_iter_bits_new(struct bpf_iter_bits *it, const u64 *unsafe_ptr__ign, u32 nr_words)
+{
+	struct bpf_iter_bits_kern *kit = (void *)it;
+	u32 nr_bytes = nr_words * sizeof(u64);
+	u32 nr_bits = BYTES_TO_BITS(nr_bytes);
+	int err;
+
+	BUILD_BUG_ON(sizeof(struct bpf_iter_bits_kern) != sizeof(struct bpf_iter_bits));
+	BUILD_BUG_ON(__alignof__(struct bpf_iter_bits_kern) !=
+		     __alignof__(struct bpf_iter_bits));
+
+	kit->nr_bits = 0;
+	kit->bits_copy = 0;
+	kit->bit = -1;
+
+	if (!unsafe_ptr__ign || !nr_words)
+		return -EINVAL;
+
+	/* Optimization for u64 mask */
+	if (nr_bits == 64) {
+		err = bpf_probe_read_kernel_common(&kit->bits_copy, nr_bytes, unsafe_ptr__ign);
+		if (err)
+			return -EFAULT;
+
+		kit->nr_bits = nr_bits;
+		return 0;
+	}
+
+	/* Fallback to memalloc */
+	kit->bits = bpf_mem_alloc(&bpf_global_ma, nr_bytes);
+	if (!kit->bits)
+		return -ENOMEM;
+
+	err = bpf_probe_read_kernel_common(kit->bits, nr_bytes, unsafe_ptr__ign);
+	if (err) {
+		bpf_mem_free(&bpf_global_ma, kit->bits);
+		return err;
+	}
+
+	kit->nr_bits = nr_bits;
+	return 0;
+}
+
+/**
+ * bpf_iter_bits_next() - Get the next bit in a bpf_iter_bits
+ * @it: The bpf_iter_bits to be checked
+ *
+ * This function returns a pointer to a number representing the value of the
+ * next bit in the bits.
+ *
+ * If there are no further bits available, it returns NULL.
+ */
+__bpf_kfunc int *bpf_iter_bits_next(struct bpf_iter_bits *it)
+{
+	struct bpf_iter_bits_kern *kit = (void *)it;
+	u32 nr_bits = kit->nr_bits;
+	const unsigned long *bits;
+	int bit;
+
+	if (nr_bits == 0)
+		return NULL;
+
+	bits = nr_bits == 64 ? &kit->bits_copy : kit->bits;
+	bit = find_next_bit(bits, nr_bits, kit->bit + 1);
+	if (bit >= nr_bits) {
+		kit->nr_bits = 0;
+		return NULL;
+	}
+
+	kit->bit = bit;
+	return &kit->bit;
+}
+
+/**
+ * bpf_iter_bits_destroy() - Destroy a bpf_iter_bits
+ * @it: The bpf_iter_bits to be destroyed
+ *
+ * Destroy the resource associated with the bpf_iter_bits.
+ */
+__bpf_kfunc void bpf_iter_bits_destroy(struct bpf_iter_bits *it)
+{
+	struct bpf_iter_bits_kern *kit = (void *)it;
+
+	if (kit->nr_bits <= 64)
+		return;
+	bpf_mem_free(&bpf_global_ma, kit->bits);
 }
 
 __bpf_kfunc_end_defs();
@@ -2726,6 +3018,15 @@ BTF_ID_FLAGS(func, bpf_dynptr_is_null)
 BTF_ID_FLAGS(func, bpf_dynptr_is_rdonly)
 BTF_ID_FLAGS(func, bpf_dynptr_size)
 BTF_ID_FLAGS(func, bpf_dynptr_clone)
+BTF_ID_FLAGS(func, bpf_modify_return_test_tp)
+BTF_ID_FLAGS(func, bpf_wq_init)
+BTF_ID_FLAGS(func, bpf_wq_set_callback_impl)
+BTF_ID_FLAGS(func, bpf_wq_start)
+BTF_ID_FLAGS(func, bpf_preempt_disable)
+BTF_ID_FLAGS(func, bpf_preempt_enable)
+BTF_ID_FLAGS(func, bpf_iter_bits_new, KF_ITER_NEW)
+BTF_ID_FLAGS(func, bpf_iter_bits_next, KF_ITER_NEXT | KF_RET_NULL)
+BTF_ID_FLAGS(func, bpf_iter_bits_destroy, KF_ITER_DESTROY)
 BTF_KFUNCS_END(common_btf_ids)
 
 static const struct btf_kfunc_id_set common_kfunc_set = {
@@ -2753,6 +3054,7 @@ static int __init kfunc_init(void)
 	ret = ret ?: register_btf_kfunc_id_set(BPF_PROG_TYPE_SCHED_CLS, &generic_kfunc_set);
 	ret = ret ?: register_btf_kfunc_id_set(BPF_PROG_TYPE_XDP, &generic_kfunc_set);
 	ret = ret ?: register_btf_kfunc_id_set(BPF_PROG_TYPE_STRUCT_OPS, &generic_kfunc_set);
+	ret = ret ?: register_btf_kfunc_id_set(BPF_PROG_TYPE_SYSCALL, &generic_kfunc_set);
 	ret = ret ?: register_btf_id_dtor_kfuncs(generic_dtors,
 						  ARRAY_SIZE(generic_dtors),
 						  THIS_MODULE);
@@ -2766,7 +3068,9 @@ late_initcall(kfunc_init);
  */
 const void *__bpf_dynptr_data(const struct bpf_dynptr_kern *ptr, u32 len)
 {
-	return bpf_dynptr_slice(ptr, 0, NULL, len);
+	const struct bpf_dynptr *p = (struct bpf_dynptr *)ptr;
+
+	return bpf_dynptr_slice(p, 0, NULL, len);
 }
 
 /* Get a pointer to dynptr data up to len bytes for read write access. If

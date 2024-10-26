@@ -91,8 +91,6 @@ struct discovery_state {
 	s8			rssi;
 	u16			uuid_count;
 	u8			(*uuids)[16];
-	unsigned long		scan_start;
-	unsigned long		scan_duration;
 	unsigned long		name_resolve_timeout;
 };
 
@@ -188,7 +186,6 @@ struct blocked_key {
 struct smp_csrk {
 	bdaddr_t bdaddr;
 	u8 bdaddr_type;
-	u8 link_type;
 	u8 type;
 	u8 val[16];
 };
@@ -198,7 +195,6 @@ struct smp_ltk {
 	struct rcu_head rcu;
 	bdaddr_t bdaddr;
 	u8 bdaddr_type;
-	u8 link_type;
 	u8 authenticated;
 	u8 type;
 	u8 enc_size;
@@ -213,7 +209,6 @@ struct smp_irk {
 	bdaddr_t rpa;
 	bdaddr_t bdaddr;
 	u8 addr_type;
-	u8 link_type;
 	u8 val[16];
 };
 
@@ -221,8 +216,6 @@ struct link_key {
 	struct list_head list;
 	struct rcu_head rcu;
 	bdaddr_t bdaddr;
-	u8 bdaddr_type;
-	u8 link_type;
 	u8 type;
 	u8 val[HCI_LINK_KEY_SIZE];
 	u8 pin_len;
@@ -478,7 +471,6 @@ struct hci_dev {
 	unsigned int	iso_pkts;
 
 	unsigned long	acl_last_tx;
-	unsigned long	sco_last_tx;
 	unsigned long	le_last_tx;
 
 	__u8		le_tx_def_phys;
@@ -530,7 +522,6 @@ struct hci_dev {
 
 	struct discovery_state	discovery;
 
-	int			discovery_old_state;
 	bool			discovery_paused;
 	int			advertising_old_state;
 	bool			advertising_paused;
@@ -649,6 +640,7 @@ struct hci_dev {
 	int (*get_codec_config_data)(struct hci_dev *hdev, __u8 type,
 				     struct bt_codec *codec, __u8 *vnd_len,
 				     __u8 **vnd_data);
+	u8 (*classify_pkt_type)(struct hci_dev *hdev, struct sk_buff *skb);
 };
 
 #define HCI_PHY_HANDLE(handle)	(handle & 0xff)
@@ -828,7 +820,7 @@ extern struct mutex hci_cb_list_lock;
 	} while (0)
 
 #define hci_dev_le_state_simultaneous(hdev) \
-	(test_bit(HCI_QUIRK_VALID_LE_STATES, &hdev->quirks) && \
+	(!test_bit(HCI_QUIRK_BROKEN_LE_STATES, &hdev->quirks) && \
 	 (hdev->le_states[4] & 0x08) &&	/* Central */ \
 	 (hdev->le_states[4] & 0x40) &&	/* Peripheral */ \
 	 (hdev->le_states[3] & 0x10))	/* Simultaneous */
@@ -890,8 +882,6 @@ static inline void hci_discovery_filter_clear(struct hci_dev *hdev)
 	hdev->discovery.uuid_count = 0;
 	kfree(hdev->discovery.uuids);
 	hdev->discovery.uuids = NULL;
-	hdev->discovery.scan_start = 0;
-	hdev->discovery.scan_duration = 0;
 }
 
 bool hci_discovery_active(struct hci_dev *hdev);
@@ -2220,8 +2210,22 @@ void hci_mgmt_chan_unregister(struct hci_mgmt_chan *c);
 /* These LE scan and inquiry parameters were chosen according to LE General
  * Discovery Procedure specification.
  */
-#define DISCOV_LE_SCAN_WIN		0x12
-#define DISCOV_LE_SCAN_INT		0x12
+#define DISCOV_LE_SCAN_WIN		0x0012 /* 11.25 msec */
+#define DISCOV_LE_SCAN_INT		0x0012 /* 11.25 msec */
+#define DISCOV_LE_SCAN_INT_FAST		0x0060 /* 60 msec */
+#define DISCOV_LE_SCAN_WIN_FAST		0x0030 /* 30 msec */
+#define DISCOV_LE_SCAN_INT_CONN		0x0060 /* 60 msec */
+#define DISCOV_LE_SCAN_WIN_CONN		0x0060 /* 60 msec */
+#define DISCOV_LE_SCAN_INT_SLOW1	0x0800 /* 1.28 sec */
+#define DISCOV_LE_SCAN_WIN_SLOW1	0x0012 /* 11.25 msec */
+#define DISCOV_LE_SCAN_INT_SLOW2	0x1000 /* 2.56 sec */
+#define DISCOV_LE_SCAN_WIN_SLOW2	0x0024 /* 22.5 msec */
+#define DISCOV_CODED_SCAN_INT_FAST	0x0120 /* 180 msec */
+#define DISCOV_CODED_SCAN_WIN_FAST	0x0090 /* 90 msec */
+#define DISCOV_CODED_SCAN_INT_SLOW1	0x1800 /* 3.84 sec */
+#define DISCOV_CODED_SCAN_WIN_SLOW1	0x0036 /* 33.75 msec */
+#define DISCOV_CODED_SCAN_INT_SLOW2	0x3000 /* 7.68 sec */
+#define DISCOV_CODED_SCAN_WIN_SLOW2	0x006c /* 67.5 msec */
 #define DISCOV_LE_TIMEOUT		10240	/* msec */
 #define DISCOV_INTERLEAVED_TIMEOUT	5120	/* msec */
 #define DISCOV_INTERLEAVED_INQUIRY_LEN	0x04
@@ -2253,8 +2257,8 @@ void mgmt_device_disconnected(struct hci_dev *hdev, bdaddr_t *bdaddr,
 			      bool mgmt_connected);
 void mgmt_disconnect_failed(struct hci_dev *hdev, bdaddr_t *bdaddr,
 			    u8 link_type, u8 addr_type, u8 status);
-void mgmt_connect_failed(struct hci_dev *hdev, bdaddr_t *bdaddr, u8 link_type,
-			 u8 addr_type, u8 status);
+void mgmt_connect_failed(struct hci_dev *hdev, struct hci_conn *conn,
+			 u8 status);
 void mgmt_pin_code_request(struct hci_dev *hdev, bdaddr_t *bdaddr, u8 secure);
 void mgmt_pin_code_reply_complete(struct hci_dev *hdev, bdaddr_t *bdaddr,
 				  u8 status);

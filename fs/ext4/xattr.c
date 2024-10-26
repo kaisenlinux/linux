@@ -458,7 +458,7 @@ static int ext4_xattr_inode_iget(struct inode *parent, unsigned long ea_ino,
 		ext4_set_inode_state(inode, EXT4_STATE_LUSTRE_EA_INODE);
 		ext4_xattr_inode_set_ref(inode, 1);
 	} else {
-		inode_lock(inode);
+		inode_lock_nested(inode, I_MUTEX_XATTR);
 		inode->i_flags |= S_NOQUOTA;
 		inode_unlock(inode);
 	}
@@ -1039,7 +1039,7 @@ static int ext4_xattr_inode_update_ref(handle_t *handle, struct inode *ea_inode,
 	s64 ref_count;
 	int ret;
 
-	inode_lock(ea_inode);
+	inode_lock_nested(ea_inode, I_MUTEX_XATTR);
 
 	ret = ext4_reserve_inode_write(handle, ea_inode, &iloc);
 	if (ret)
@@ -1433,6 +1433,12 @@ retry:
 			goto out;
 
 		memcpy(bh->b_data, buf, csize);
+		/*
+		 * Zero out block tail to avoid writing uninitialized memory
+		 * to disk.
+		 */
+		if (csize < blocksize)
+			memset(bh->b_data + csize, 0, blocksize - csize);
 		set_buffer_uptodate(bh);
 		ext4_handle_dirty_metadata(handle, ea_inode, bh);
 
@@ -2028,8 +2034,13 @@ clone_block:
 
 inserted:
 	if (!IS_LAST_ENTRY(s->first)) {
-		new_bh = ext4_xattr_block_cache_find(inode, header(s->base),
-						     &ce);
+		new_bh = ext4_xattr_block_cache_find(inode, header(s->base), &ce);
+		if (IS_ERR(new_bh)) {
+			error = PTR_ERR(new_bh);
+			new_bh = NULL;
+			goto cleanup;
+		}
+
 		if (new_bh) {
 			/* We found an identical block in the cache. */
 			if (new_bh == bs->bh)
@@ -2127,6 +2138,17 @@ getblk_failed:
 						      ENTRY(header(s->base)+1));
 			if (error)
 				goto getblk_failed;
+			if (ea_inode) {
+				/* Drop the extra ref on ea_inode. */
+				error = ext4_xattr_inode_dec_ref(handle,
+								 ea_inode);
+				if (error)
+					ext4_warning_inode(ea_inode,
+							   "dec ref error=%d",
+							   error);
+				iput(ea_inode);
+				ea_inode = NULL;
+			}
 
 			lock_buffer(new_bh);
 			error = ext4_journal_get_create_access(handle, sb,
@@ -2537,6 +2559,8 @@ retry:
 
 		error = ext4_xattr_set_handle(handle, inode, name_index, name,
 					      value, value_len, flags);
+		ext4_fc_mark_ineligible(inode->i_sb, EXT4_FC_REASON_XATTR,
+					handle);
 		error2 = ext4_journal_stop(handle);
 		if (error == -ENOSPC &&
 		    ext4_should_retry_alloc(sb, &retries))
@@ -2544,7 +2568,6 @@ retry:
 		if (error == 0)
 			error = error2;
 	}
-	ext4_fc_mark_ineligible(inode->i_sb, EXT4_FC_REASON_XATTR, NULL);
 
 	return error;
 }
@@ -3083,8 +3106,8 @@ ext4_xattr_cmp(struct ext4_xattr_header *header1,
  *
  * Find an identical extended attribute block.
  *
- * Returns a pointer to the block found, or NULL if such a block was
- * not found or an error occurred.
+ * Returns a pointer to the block found, or NULL if such a block was not
+ * found, or an error pointer if an error occurred while reading ea block.
  */
 static struct buffer_head *
 ext4_xattr_block_cache_find(struct inode *inode,
@@ -3106,13 +3129,11 @@ ext4_xattr_block_cache_find(struct inode *inode,
 
 		bh = ext4_sb_bread(inode->i_sb, ce->e_value, REQ_PRIO);
 		if (IS_ERR(bh)) {
-			if (PTR_ERR(bh) == -ENOMEM) {
-				mb_cache_entry_put(ea_block_cache, ce);
-				return NULL;
-			}
-			bh = NULL;
-			EXT4_ERROR_INODE(inode, "block %lu read error",
-					 (unsigned long)ce->e_value);
+			if (PTR_ERR(bh) != -ENOMEM)
+				EXT4_ERROR_INODE(inode, "block %lu read error",
+						 (unsigned long)ce->e_value);
+			mb_cache_entry_put(ea_block_cache, ce);
+			return bh;
 		} else if (ext4_xattr_cmp(header, BHDR(bh)) == 0) {
 			*pce = ce;
 			return bh;

@@ -4064,7 +4064,7 @@ static int gsm_create_network(struct gsm_dlci *dlci, struct gsm_netconfig *nc)
 	mux_net = netdev_priv(net);
 	mux_net->dlci = dlci;
 	kref_init(&mux_net->ref);
-	strncpy(nc->if_name, net->name, IFNAMSIZ); /* return net name */
+	strscpy(nc->if_name, net->name); /* return net name */
 
 	/* reconfigure dlci for network */
 	dlci->prev_adaption = dlci->adaption;
@@ -4634,5 +4634,6 @@ module_init(gsm_init);
 module_exit(gsm_exit);
 
 
+MODULE_DESCRIPTION("GSM 0710 tty multiplexor");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS_LDISC(N_GSM0710);
